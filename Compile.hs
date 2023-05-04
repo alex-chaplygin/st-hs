@@ -24,7 +24,7 @@ data Bytecode =
 data Expr a =
   ENUM a
   | EID String
-  | EMSG String String [(String, Expr a)]-- message: obj selector params
+  | EMSG (Expr a) [(String, Expr a)]-- message: obj selector params
   | EADD (Expr a) (Expr a)
   | ESUB (Expr a) (Expr a)
   | EMUL (Expr a) (Expr a)
@@ -60,7 +60,8 @@ keyword = do {(EID s) <- ident; char ':'; return $ s ++ ":"} -- max:
 expr :: ReadP (Expr Integer)
 pair = do {k <- keyword; e <- expr; return (k, e)}
 message = do {(EID obj) <- ident; (EID sel) <- ident; params <- many pair; return $ EMSG obj sel params}
-factor = number +++ message +++ ident +++ do {mychar '(' ; e <- expr ; mychar ')'; return e}
+umessage = do {obj <- expr; (EID sel) <- ident; return $ EMSG obj sel []}
+factor = number +++ umessage +++ ident +++ do {mychar '(' ; e <- expr ; mychar ')'; return e}
 term = chainl1 factor $ choice [mul, div']
 sumexpr = option (error "Error in expression") $ chainl1 term $ choice [plus, minus]
 expr = chainl1 sumexpr $ choice [less]
