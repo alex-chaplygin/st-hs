@@ -31,6 +31,10 @@ qexpr = do {mychar '\''; e <- sexpr; return $ case e of
            } +++ sexpr
 parse s = fst $ last $ readP_to_S qexpr s
 
+evalAtom (LIST []) = ATOM "T"
+evalAtom (ATOM _) = ATOM "T"
+evalAtom _ = LIST []
+
 eq (ATOM a: ATOM b:_) = if a == b then ATOM "T" else LIST []
 eq (LIST a: LIST b:_) = if a == b then ATOM "T" else LIST []
 eq _ = LIST []
@@ -41,33 +45,43 @@ evalCar _ = error "not list in CAR"
 evalCdr (LIST l) = LIST $ tail l
 evalCdr _ = error "not list in CDR"
 
---makeArgs :: [Object] -> [Int]
+cons (a:[LIST b]) = LIST (a:b)
+cons _ = error "Invalid CONS"
+
 eval :: Object -> Object
+cond [] = error "empty cond"
+cond ((LIST (p:e)):t) = let p' = eval p in
+  if p' == ATOM "T" then eval $ head e
+  else cond t
+
+-- создать окружение для функции (переменная, значение)
+makeEnv :: Object -> [Object] -> [(String, Object)]
+makeEnv (LIST params) values = zip (map fromAtom params) values
+  where fromAtom (ATOM a) = a
+        fromAtom _ = error "Not atoms in params"
+
+lambda :: Object -> Object -> [Object] -> Object
+lambda params body args = params
+--  let pars = makeEnv params $ map eval args in
+--    eval $ fmap f body
+--    where f (ATOM s) = 
+
 eval (NUM i) = NUM i
 eval (LIST []) = LIST []
-eval (LIST (car:cdr)) =
---  let (h:args) = makeArgs cdr in
+eval (LIST (ATOM "QUOTE":cdr)) = head cdr
+eval (LIST (ATOM "COND":cdr)) = cond cdr
+eval (LIST (LIST (ATOM "LAMBDA":params:body)):args) = lambda params body args
+eval (car:cdr) =
+    let args = map eval cdr in
   case car of
 --   ATOM "+" -> INT $ foldl (+) h args
 --   ATOM "-" -> INT $ foldl (-) h args
 --   ATOM "*" -> INT $ foldl (*) h args
 --   ATOM "/" -> INT $ foldl div h args
-   ATOM "QUOTE" -> head cdr
-   ATOM "ATOM" -> case (eval $ head cdr) of
-                    LIST [] -> ATOM "T"
-                    ATOM _ -> ATOM "T"
-                    _ -> LIST []
-   ATOM "EQ" -> eq cdr
-   ATOM "CAR" -> evalCar $ eval $ head cdr
-   ATOM "CDR" -> evalCdr $ eval $ head cdr
+   ATOM "ATOM" -> evalAtom $ head args
+   ATOM "EQ" -> eq args
+   ATOM "CAR" -> evalCar $ head args
+   ATOM "CDR" -> evalCdr $ head args
+   ATOM "CONS" -> cons args
    _ -> error "Unknown function"
 eval s = error $ "Error: " ++ (show s)
-
---makeArgs [] = []               
---makeArgs (car:cdr) =
---  let v = eval car in
---    case v of
---      INT i -> i : makeArgs cdr
---      _ -> error "Not Int"
-               
-
