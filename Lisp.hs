@@ -8,11 +8,21 @@ import qualified Control.Monad.State as S
 data Object = ATOM String
   | NUM Int
   | LIST [Object]
-  deriving (Show, Eq)
+  deriving (Eq)
 
 type Environment = Map String Object
 
+data Result = OK Object
+  | ERROR String
+  deriving Eq
+
+instance Show Object where
+  show (ATOM s) = s
+  show (NUM i) = (show i)
+  show (LIST l) = "(" ++ (concat $ intersperse " " $ map show l) ++ ")"
+
 isNotDigit c = c < '0' || c > '9'
+isMySymbol c = isSymbol c || c == '*' || c == '/'
 
 number :: ReadP Object
 number = do
@@ -22,8 +32,8 @@ number = do
 
 mychar c = do {skipSpaces; char c}
 
-atomFirst c = (isAlpha c || isSymbol c) && c /= '(' && c /= ')'
-atomSym c = (isAlphaNum c || isSymbol c) && c /= '(' && c /= ')'
+atomFirst c = (isAlpha c || isMySymbol c) && c /= '(' && c /= ')'
+atomSym c = (isAlphaNum c || isMySymbol c) && c /= '(' && c /= ')'
 
 qexpr :: ReadP Object
 atom = do {skipSpaces; c <- satisfy atomFirst; s <- munch atomSym; return $ ATOM $ map toUpper (c:s)}
@@ -34,7 +44,7 @@ qexpr = do {mychar '\''; e <- sexpr; return $ case e of
                LIST l -> LIST $ (ATOM "QUOTE") : [LIST l]
                b -> LIST $ (ATOM "QUOTE") : [b]
            } +++ sexpr
-parse s = fst $ last $ readP_to_S qexpr s
+parse s = readP_to_S qexpr s
 
 evalAtom (LIST []) = ATOM "T"
 evalAtom (ATOM _) = ATOM "T"
@@ -67,6 +77,10 @@ funcall env f args = case Map.lookup f env of
      Nothing -> error $ "Unknown function " ++ (show f)
      Just val -> eval env $ LIST $ val:args
 
+evalExpr f (h:t) = foldl f (unInt h) $ map unInt t
+  where unInt (NUM i) = i
+        unInt _ = error "Не число в выражении"
+
 -- создать окружение для функции (переменная, значение)
 makeEnv :: Object -> [Object] -> Environment
 makeEnv (LIST params) values = if length params /= length values then
@@ -91,10 +105,10 @@ eval env (LIST ((LIST (ATOM "LAMBDA":params:body)):args)) =
 eval env (LIST (car:cdr)) =
   let args = map fst $ map (eval env) cdr in
   case car of
---   ATOM "+" -> INT $ foldl (+) h args
---   ATOM "-" -> INT $ foldl (-) h args
---   ATOM "*" -> INT $ foldl (*) h args
---   ATOM "/" -> INT $ foldl div h args
+   ATOM "+" -> (NUM $ evalExpr (+) args, env)
+   ATOM "-" -> (NUM $ evalExpr (-) args, env)
+   ATOM "*" -> (NUM $ evalExpr (*) args, env)
+   ATOM "/" -> (NUM $ evalExpr div args, env)
    ATOM "ATOM" -> (evalAtom $ head args, env)
    ATOM "EQ" -> (eq args, env)
    ATOM "CAR" -> (evalCar $ head args, env)
@@ -102,6 +116,38 @@ eval env (LIST (car:cdr)) =
    ATOM "CONS" -> (cons args, env)
    ATOM "DEFUN" -> (ATOM "T", defun env cdr)
    ATOM f -> funcall env f cdr
+   _ -> error "Не функция"
+
+lookVar :: String -> S.State Environment Result
+lookVar var = do
+  env <- S.get
+  return $ case Map.lookup var env of
+     Nothing -> ERROR $ "Неизвестная переменная " ++ (show var)
+     Just val -> OK val
+
+ev :: Object -> S.State Environment Result
+
+cond' [] = return $ ERROR "Пустое условие COND"
+cond' ((LIST (p:e)):t) = do
+  env <- S.get
+  let (p', _) = S.runState (ev p) env
+  case p' of
+    OK (ATOM "T") -> ev $ head e
+    OK _ -> cond' t
+    ERROR s -> return $ ERROR s
+
+--lambda' params body args =
+--  let args' = map unOk $ map ev args in -- вычислить аргументы
+--  let env' = Map.union (makeEnv params args') env in -- вычислить новое окружение
+--  eval env' $ head body
+
+ev (NUM i) = return $ OK $ NUM i
+ev (ATOM var) = lookVar var
+ev (LIST []) = return $ OK $ LIST []
+ev (LIST (ATOM "QUOTE":cdr)) = return $ OK $ head cdr
+ev (LIST (ATOM "COND":cdr)) = cond' cdr
+--ev (LIST ((LIST (ATOM "LAMBDA":params:body)):args)) = lambda' params body args
+ev _ = return $ ERROR "ER"
 
 process :: S.StateT Environment IO ()
 process = do
@@ -110,9 +156,15 @@ process = do
   str <- S.liftIO $ getLine
   if str == "q" then return ()
     else do
-    let (res, env) = eval e $ parse str
-    S.liftIO $ putStrLn $ (show res)
-    S.put env
+    let ob = parse str
+    if ob == [] then do
+      S.liftIO $ putStrLn "Ошибка ввода"
+      else do
+      let (res, env) = eval e (fst $ last $ ob)
+      S.liftIO $ putStrLn (show res) --of
+--        OK o -> (show o)
+--        ERROR e -> "Ошибка: " ++ e
+      S.put env
     process
 
 repl :: IO ()
