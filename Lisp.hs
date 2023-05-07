@@ -1,11 +1,16 @@
 import Text.ParserCombinators.ReadP
 import Data.Char
 import Data.List
+import Data.Map (Map)
+import qualified Data.Map as Map
+import qualified Control.Monad.State as S
 
 data Object = ATOM String
   | NUM Int
   | LIST [Object]
   deriving (Show, Eq)
+
+type Environment = Map String Object
 
 isNotDigit c = c < '0' || c > '9'
 
@@ -48,31 +53,35 @@ evalCdr _ = error "not list in CDR"
 cons (a:[LIST b]) = LIST (a:b)
 cons _ = error "Invalid CONS"
 
-eval :: Object -> Object
-cond [] = error "empty cond"
-cond ((LIST (p:e)):t) = let p' = eval p in
-  if p' == ATOM "T" then eval $ head e
-  else cond t
+eval :: Environment -> Object -> Object
+cond _ [] = error "empty cond"
+cond env ((LIST (p:e)):t) = let p' = eval env p in
+  if p' == ATOM "T" then eval env $ head e
+  else cond env t
 
 -- создать окружение для функции (переменная, значение)
-makeEnv :: Object -> [Object] -> [(String, Object)]
-makeEnv (LIST params) values = zip (map fromAtom params) values
+makeEnv :: Object -> [Object] -> Environment
+makeEnv (LIST params) values = if length params /= length values then
+  error "Invalid params count"
+  else
+  Map.fromList $ zip (map fromAtom params) values
   where fromAtom (ATOM a) = a
         fromAtom _ = error "Not atoms in params"
-
-lambda :: Object -> Object -> [Object] -> Object
-lambda params body args = params
---  let pars = makeEnv params $ map eval args in
---    eval $ fmap f body
---    where f (ATOM s) = 
-
-eval (NUM i) = NUM i
-eval (LIST []) = LIST []
-eval (LIST (ATOM "QUOTE":cdr)) = head cdr
-eval (LIST (ATOM "COND":cdr)) = cond cdr
-eval (LIST (LIST (ATOM "LAMBDA":params:body)):args) = lambda params body args
-eval (car:cdr) =
-    let args = map eval cdr in
+makeEnv _ _ = error "No params list"             
+                                               
+eval _ (NUM i) = NUM i
+eval env (ATOM var) = case Map.lookup var env of
+     Nothing -> error $ "Unknown variable " ++ (show var)
+     Just val -> val
+eval _ (LIST []) = LIST []
+eval _ (LIST (ATOM "QUOTE":cdr)) = head cdr
+eval env (LIST (ATOM "COND":cdr)) = cond env cdr
+eval env (LIST ((LIST (ATOM "LAMBDA":params:body)):args)) =
+  let args' = map (eval env) args in -- вычислить аргументы
+  let env' = Map.union (makeEnv params args') env in -- вычислить новое окружение
+  eval env' $ head body
+eval env (LIST (car:cdr)) =
+  let args = map (eval env) cdr in
   case car of
 --   ATOM "+" -> INT $ foldl (+) h args
 --   ATOM "-" -> INT $ foldl (-) h args
@@ -84,4 +93,19 @@ eval (car:cdr) =
    ATOM "CDR" -> evalCdr $ head args
    ATOM "CONS" -> cons args
    _ -> error "Unknown function"
-eval s = error $ "Error: " ++ (show s)
+
+process :: S.StateT Environment IO ()
+process = do
+  env <- S.get -- получаем текущее окружение
+  S.liftIO $ putStr "> "
+  str <- S.liftIO $ getLine
+  if str == "q" then return ()
+    else do
+    S.liftIO $ putStrLn $ show $ eval env $ parse str
+    process
+
+repl :: IO ()
+repl = do
+  let env = Map.empty
+  res <- S.runStateT process env
+  return ()
