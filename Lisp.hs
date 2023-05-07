@@ -53,11 +53,19 @@ evalCdr _ = error "not list in CDR"
 cons (a:[LIST b]) = LIST (a:b)
 cons _ = error "Invalid CONS"
 
-eval :: Environment -> Object -> Object
+eval :: Environment -> Object -> (Object, Environment)
 cond _ [] = error "empty cond"
-cond env ((LIST (p:e)):t) = let p' = eval env p in
+cond env ((LIST (p:e)):t) = let (p', _) = eval env p in
   if p' == ATOM "T" then eval env $ head e
   else cond env t
+
+defun env (ATOM name:params:body) =
+  let lam = LIST $ (ATOM "LAMBDA"):params:body in
+  Map.insert name lam env
+
+funcall env f args = case Map.lookup f env of
+     Nothing -> error $ "Unknown function " ++ (show f)
+     Just val -> eval env $ LIST $ val:args
 
 -- создать окружение для функции (переменная, значение)
 makeEnv :: Object -> [Object] -> Environment
@@ -68,40 +76,43 @@ makeEnv (LIST params) values = if length params /= length values then
   where fromAtom (ATOM a) = a
         fromAtom _ = error "Not atoms in params"
 makeEnv _ _ = error "No params list"             
-                                               
-eval _ (NUM i) = NUM i
+
+eval e (NUM i) = (NUM i, e)
 eval env (ATOM var) = case Map.lookup var env of
      Nothing -> error $ "Unknown variable " ++ (show var)
-     Just val -> val
-eval _ (LIST []) = LIST []
-eval _ (LIST (ATOM "QUOTE":cdr)) = head cdr
+     Just val -> (val, env)
+eval e (LIST []) = (LIST [], e)
+eval e (LIST (ATOM "QUOTE":cdr)) = (head cdr, e)
 eval env (LIST (ATOM "COND":cdr)) = cond env cdr
 eval env (LIST ((LIST (ATOM "LAMBDA":params:body)):args)) =
-  let args' = map (eval env) args in -- вычислить аргументы
+  let args' = map fst $ map (eval env) args in -- вычислить аргументы
   let env' = Map.union (makeEnv params args') env in -- вычислить новое окружение
   eval env' $ head body
 eval env (LIST (car:cdr)) =
-  let args = map (eval env) cdr in
+  let args = map fst $ map (eval env) cdr in
   case car of
 --   ATOM "+" -> INT $ foldl (+) h args
 --   ATOM "-" -> INT $ foldl (-) h args
 --   ATOM "*" -> INT $ foldl (*) h args
 --   ATOM "/" -> INT $ foldl div h args
-   ATOM "ATOM" -> evalAtom $ head args
-   ATOM "EQ" -> eq args
-   ATOM "CAR" -> evalCar $ head args
-   ATOM "CDR" -> evalCdr $ head args
-   ATOM "CONS" -> cons args
-   _ -> error "Unknown function"
+   ATOM "ATOM" -> (evalAtom $ head args, env)
+   ATOM "EQ" -> (eq args, env)
+   ATOM "CAR" -> (evalCar $ head args, env)
+   ATOM "CDR" -> (evalCdr $ head args, env)
+   ATOM "CONS" -> (cons args, env)
+   ATOM "DEFUN" -> (ATOM "T", defun env cdr)
+   ATOM f -> funcall env f cdr
 
 process :: S.StateT Environment IO ()
 process = do
-  env <- S.get -- получаем текущее окружение
+  e <- S.get -- получаем текущее окружение
   S.liftIO $ putStr "> "
   str <- S.liftIO $ getLine
   if str == "q" then return ()
     else do
-    S.liftIO $ putStrLn $ show $ eval env $ parse str
+    let (res, env) = eval e $ parse str
+    S.liftIO $ putStrLn $ (show res)
+    S.put env
     process
 
 repl :: IO ()
