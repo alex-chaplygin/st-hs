@@ -12,6 +12,10 @@ data Object = ATOM String
 
 type Environment = Map String Object
 
+data Result = OK Object
+  | ERROR String
+  deriving Eq
+
 instance Show Object where
   show (ATOM s) = s
   show (NUM i) = (show i)
@@ -114,20 +118,57 @@ eval env (LIST (car:cdr)) =
    ATOM f -> funcall env f cdr
    _ -> error "Не функция"
 
-loop env = do
-  putStr "> "
-  str <- getLine
-  if str == "q" then return () else do
+lookVar :: String -> S.State Environment Result
+lookVar var = do
+  env <- S.get
+  return $ case Map.lookup var env of
+     Nothing -> ERROR $ "Неизвестная переменная " ++ (show var)
+     Just val -> OK val
+
+ev :: Object -> S.State Environment Result
+
+cond' [] = return $ ERROR "Пустое условие COND"
+cond' ((LIST (p:e)):t) = do
+  env <- S.get
+  let (p', _) = S.runState (ev p) env
+  case p' of
+    OK (ATOM "T") -> ev $ head e
+    OK _ -> cond' t
+    ERROR s -> return $ ERROR s
+
+--lambda' params body args =
+--  let args' = map unOk $ map ev args in -- вычислить аргументы
+--  let env' = Map.union (makeEnv params args') env in -- вычислить новое окружение
+--  eval env' $ head body
+
+ev (NUM i) = return $ OK $ NUM i
+ev (ATOM var) = lookVar var
+ev (LIST []) = return $ OK $ LIST []
+ev (LIST (ATOM "QUOTE":cdr)) = return $ OK $ head cdr
+ev (LIST (ATOM "COND":cdr)) = cond' cdr
+--ev (LIST ((LIST (ATOM "LAMBDA":params:body)):args)) = lambda' params body args
+ev _ = return $ ERROR "ER"
+
+process :: S.StateT Environment IO ()
+process = do
+  e <- S.get -- получаем текущее окружение
+  S.liftIO $ putStr "> "
+  str <- S.liftIO $ getLine
+  if str == "q" then return ()
+    else do
     let ob = parse str
     if ob == [] then do
-      putStrLn "Ошибка ввода"
-      loop env
+      S.liftIO $ putStrLn "Ошибка ввода"
       else do
-      let (res, env') = eval env (fst $ last $ ob)
-      putStrLn (show res)
-      loop env'
+      let (res, env) = eval e (fst $ last $ ob)
+      S.liftIO $ putStrLn (show res) --of
+--        OK o -> (show o)
+--        ERROR e -> "Ошибка: " ++ e
+      S.put env
+    process
 
 repl :: IO ()
 repl = do
   let env = Map.empty
-  loop env
+  res <- S.runStateT process env
+  return ()
