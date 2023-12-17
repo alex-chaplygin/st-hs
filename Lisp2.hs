@@ -2,7 +2,6 @@ import Text.ParserCombinators.ReadP
 import Data.Char
 import Data.List
 import Data.Map (Map)
-import qualified Data.Map as Map
 import qualified Control.Monad.State as S
 
 data Object = SYMBOL String
@@ -11,7 +10,7 @@ data Object = SYMBOL String
   | LAMBDA Object [Object] -- функция параметры тело
   deriving (Eq)
 
-type Environment = Map String Object
+type Environment = [(String, Object)]
 
 data Result = OK Object
   | ERROR String
@@ -49,7 +48,7 @@ parse s = readP_to_S obj s
 
 t = SYMBOL "T"
 nil = LIST []
-globalEnv = Map.fromList [("T", t), ("NIL", nil)]
+globalEnv = [("T", t), ("NIL", nil)]
 
 eq (LIST []: LIST []: []) = t
 eq (SYMBOL a: SYMBOL b:_) = if a == b then t else nil
@@ -74,20 +73,28 @@ cond env ((LIST (p:e)):tail) = let (p', _) = eval env p in
   if p' == t then eval env $ head e
   else cond env tail
 
+-- поиск символа в окружении
+envLookup :: String -> Environment -> Object
+envLookup var [] = error $ "Нет переменной " ++ (show var)
+envLookup var ((key, obj):tail) = if key == var then obj else envLookup var tail
+-- обновление переменной в окружении
+update :: String -> Object -> Environment -> Environment
+update var val env = update' var val env [] where
+  update' var val [] env = (var, val):env
+  update' var val ((key, obj):tail) env = if key == var then (key, val):tail else
+    (key, obj):update var val tail
+
 defun env (SYMBOL name:params:body) =
-  let lam = LAMBDA params body in
-  Map.insert name lam env
+  let lam = LAMBDA params body in update name lam env
 
 evalExpr f (h:tail) = foldl f (unInt h) $ map unInt tail
   where unInt (NUM i) = i
         unInt _ = error "Не число в выражении"
-
 -- создать окружение для функции (переменная, значение)
 makeEnv :: Object -> [Object] -> Environment
 makeEnv (LIST params) values = if length params /= length values then
   error "Invalid params count"
-  else
-  Map.fromList $ zip (map fromAtom params) values
+  else zip (map fromAtom params) values
   where fromAtom (SYMBOL a) = a
         fromAtom _ = error "Not atoms in params"
 makeEnv _ _ = error "No params list"             
@@ -96,21 +103,19 @@ makeEnv _ _ = error "No params list"
 --       Окружение -> Функция -> Аргументы -> (Результат, Новое окружение)
 apply :: Environment -> Object -> [Object] -> (Object, Environment)
 apply env (LAMBDA params body) args = 
-  let env' = Map.union (makeEnv params args) env in -- вычислить новое окружение
+  let env' = (makeEnv params args) ++ env in -- вычислить кадр стека окружения
     eval env' $ LIST (SYMBOL "PROGN":body) -- невный PROGN
 apply _ _ _ = error "Применяется не функция"
 
 eval e (NUM i) = (NUM i, e)
 eval e (LIST []) = (LIST [], e)
-eval env (SYMBOL var) = case Map.lookup var env of
-     Nothing -> error $ "Unknown variable " ++ (show var)
-     Just val -> (val, env)
+eval env (SYMBOL var) = (envLookup var env, env)
 -- особые формы     
 eval e (LIST (SYMBOL "QUOTE":cdr)) = (head cdr, e)
 eval env (LIST (SYMBOL "COND":cdr)) = cond env cdr
 eval env (LIST (SYMBOL "PROGN":cdr)) = foldl (\(o, e) obj->eval e obj) (nil, env) cdr
 eval env (LIST (SYMBOL "SETQ":SYMBOL var:expr)) =
-  let (v, _) = eval env (head expr) in (v, Map.insert var v env)
+  let (v, _) = eval env (head expr) in (v, update var v env)
 eval env (LIST (SYMBOL "LAMBDA":args:body)) = (LAMBDA args body, env)
 eval env (LIST (car:cdr)) =
   let args = map fst $ map (eval env) cdr in
@@ -150,3 +155,4 @@ repl = do
   let env = globalEnv
   res <- S.runStateT process env
   return ()
+main = repl
