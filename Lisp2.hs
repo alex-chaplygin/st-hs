@@ -7,7 +7,7 @@ import qualified Control.Monad.State as S
 data Object = SYMBOL String
   | NUM Int
   | LIST [Object]
-  | LAMBDA Object [Object] -- функция параметры тело
+  | LAMBDA Object [Object] Environment -- функция параметры тело окружение
   deriving (Eq)
 
 type Environment = [(String, Object)]
@@ -21,7 +21,7 @@ instance Show Object where
   show (NUM i) = (show i)
   show (LIST []) = "NIL"
   show (LIST l) = "(" ++ (concat $ intersperse " " $ map show l) ++ ")"
-  show (LAMBDA args body) = "LAMBDA " ++ (show args) ++ " " ++ (concat $ intersperse " " $ map show body)
+  show (LAMBDA args body env) = "LAMBDA " ++ (show args) ++ " " ++ (concat $ intersperse " " $ map show body) ++ "env = " ++ (show env)
 
 isNotDigit c = c < '0' || c > '9'
 isMySymbol c = isSymbol c || c == '*' || c == '/' || c == '+' || c == '-'
@@ -85,7 +85,7 @@ update var val env = update' var val env [] where
     (key, obj):update var val tail
 
 defun env (SYMBOL name:params:body) =
-  let lam = LAMBDA params body in update name lam env
+  let lam = LAMBDA params body env in update name lam env
 
 evalExpr f (h:tail) = foldl f (unInt h) $ map unInt tail
   where unInt (NUM i) = i
@@ -102,8 +102,8 @@ makeEnv _ _ = error "No params list"
 -- применение функции
 --       Окружение -> Функция -> Аргументы -> (Результат, Новое окружение)
 apply :: Environment -> Object -> [Object] -> (Object, Environment)
-apply env (LAMBDA params body) args = 
-  let env' = (makeEnv params args) ++ env in -- вычислить кадр стека окружения
+apply env (LAMBDA params body fenv) args = 
+  let env' = (makeEnv params args) ++ fenv ++ env in -- вычислить кадр стека окружения
     eval env' $ LIST (SYMBOL "PROGN":body) -- невный PROGN
 apply _ _ _ = error "Применяется не функция"
 
@@ -116,7 +116,7 @@ eval env (LIST (SYMBOL "COND":cdr)) = cond env cdr
 eval env (LIST (SYMBOL "PROGN":cdr)) = foldl (\(o, e) obj->eval e obj) (nil, env) cdr
 eval env (LIST (SYMBOL "SETQ":SYMBOL var:expr)) =
   let (v, _) = eval env (head expr) in (v, update var v env)
-eval env (LIST (SYMBOL "LAMBDA":args:body)) = (LAMBDA args body, env)
+eval env (LIST (SYMBOL "LAMBDA":args:body)) = (LAMBDA args body env, env)
 eval env (LIST (car:cdr)) =
   let args = map fst $ map (eval env) cdr in
   case car of -- встроенные примитивы
