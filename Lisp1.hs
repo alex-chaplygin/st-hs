@@ -1,3 +1,4 @@
+-- Базовый интерпретатор Лисп с одним окружением
 import Text.ParserCombinators.ReadP
 import Data.Char
 import Data.List
