@@ -118,9 +118,9 @@ eval e f (LIST (SYMBOL "QUOTE":cdr)) = (head cdr, e, f)
 eval env fenv (LIST (SYMBOL "COND":cdr)) = cond env fenv cdr
 eval env fenv (LIST (SYMBOL "PROGN":cdr)) = foldl (\(o, e, f) obj->eval e f obj) (nil, env, fenv) cdr
 eval env fenv (LIST (SYMBOL "SETQ":SYMBOL var:expr)) =
-  let (v, _) = eval env fenv (head expr) in (v, update var v env, fenv)
+  let (v, _, _) = eval env fenv (head expr) in (v, update var v env, fenv)
 eval env fenv (LIST (SYMBOL "LAMBDA":args:body)) = (LAMBDA args body env, env, fenv)
-eval env fenv (LIST (LIST (SYMBOL "LAMBDA":args:body)):vals) = apply env fenv (LAMBDA args body env) $ calcArgs env fenv vals
+eval env fenv (LIST (LIST (SYMBOL "LAMBDA":args:body):vals)) = apply env fenv (LAMBDA args body env) $ calcArgs env fenv vals
 eval env fenv (LIST (car:cdr)) =
   let args = calcArgs env fenv cdr in
   case car of -- встроенные примитивы
@@ -135,7 +135,9 @@ eval env fenv (LIST (car:cdr)) =
    SYMBOL "CONS" -> (cons args, env, fenv)
    SYMBOL "LIST" -> (LIST args, env, fenv)
    SYMBOL "DEFUN" -> (head cdr, env, defun fenv cdr)
-   SYMBOL "FUNCALL" -> (apply env fenv (head args) (tail args), env, fenv)
+   SYMBOL "FUNCALL" -> case head args of
+     SYMBOL s -> apply env fenv (envLookup s fenv) $ tail args
+     _ -> error "Не символ функции"
    SYMBOL f -> apply env fenv (envLookup f fenv) args
    _ -> error "Неправильный вызов функции"
 
