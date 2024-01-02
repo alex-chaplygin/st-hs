@@ -23,9 +23,16 @@ data Continuation = IfContinuation Continuation Object Object Environment
                   | FunContinuation Continuation [Object] Environment
                   -- применение функции после вычисления аргументов
                   | ApplyContinuation Continuation Object Environment
+                  -- вычисление аргумента
                   | ArgContinuation Continuation [Object] Environment
+                  -- сохранение вычисленного аргумента
                   | GathContinuation Continuation Object
+--                  | CatchContinuation Continuation [Object] Environment
+--                  | LabelContinuation Continuation Object
+--                  | ThrowContinuation Continuation Object Environment
+                  -- начальное пустое продолжение
                   | EmptyContinuation Environment
+                  deriving (Eq, Show)
 
 data Result = OK Object
   | ERROR String
@@ -37,6 +44,7 @@ instance Show Object where
   show (LIST []) = "NIL"
   show (LIST l) = "(" ++ (concat $ intersperse " " $ map show l) ++ ")"
   show (LAMBDA args body env) = "LAMBDA " ++ (show args) ++ " " ++ (concat $ intersperse " " $ map show body) ++ " env = " ++ (show env)
+  show (PRIM s) = "PRIM " ++ (show s)
 
 isNotDigit c = c < '0' || c > '9'
 isMySymbol c = isSymbol c || c == '*' || c == '/' || c == '+' || c == '-'
@@ -73,14 +81,14 @@ update env var val = update' var val env [] where
     (key, obj):update tail var val
 -- обновление окружения внутри продолжения
 updateCont :: Continuation -> String -> Object -> Continuation
-updateCont (IfContinuation cc o1 o2 env) var val = IfContinuation cc o1 o2 $ update env var val
-updateCont (BeginContinuation cc o env) var val = BeginContinuation cc o $ update env var val
+--updateCont (IfContinuation cc o1 o2 env) var val = IfContinuation cc o1 o2 $ update env var val
+--updateCont (BeginContinuation cc o env) var val = BeginContinuation cc o $ update env var val
 updateCont (SetContinuation cc s env) var val = SetContinuation cc s $ update env var val
-updateCont (FunContinuation cc s env) var val = FunContinuation cc s $ update env var val
-updateCont (ApplyContinuation cc s env) var val = ApplyContinuation cc s $ update env var val
-updateCont (ArgContinuation cc s env) var val = ArgContinuation cc s $ update env var val
-updateCont (EmptyContinuation env) var val = EmptyContinuation $ update env var val
-updateCont (GathContinuation cc s) var val = GathContinuation cc s
+--updateCont (FunContinuation cc s env) var val = FunContinuation cc s $ update env var val
+--updateCont (ApplyContinuation cc s env) var val = ApplyContinuation cc s $ update env var val
+--updateCont (ArgContinuation cc s env) var val = ArgContinuation cc s $ update env var val
+--updateCont (EmptyContinuation env) var val = EmptyContinuation $ update env var val
+updateCont c _ _ = c
 -- вычисление аргументов при вызове функции
 evalArgs :: [Object] -> Environment -> Continuation -> (Object, Environment)
 evalArgs [] _ cc = resume cc $ LIST []
@@ -97,9 +105,9 @@ makeEnv _ _ = error "No params list"
 invoke :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
 invoke (LAMBDA args body e) vals env cc = let newEnv = makeEnv args vals ++ e in
    evalBegin body newEnv cc
-invoke (CONT cc) vals env cc = resume cc $ head vals
+invoke (CONT cc) vals env _ = resume cc $ head vals
 -- вызов продолжить  с текущим продолжением
-invoke (PRIM "call") vals env cc = invoke (head vals) [CONT cc] env cc
+invoke (PRIM "call/cc") vals env cc = invoke (head vals) [CONT cc] env cc
 -- вызов примитива
 invoke (PRIM f) vals _ cc = resume cc $ prim f vals
 invoke _ _ _ _ = error "Invoke"
@@ -112,6 +120,8 @@ resume (SetContinuation cc var env) val = resume (updateCont cc var val) val
 resume (FunContinuation cc args env) f = evalArgs args env $ ApplyContinuation cc f env
 resume (ArgContinuation cc args env) val = evalArgs args env $ GathContinuation cc val
 resume (GathContinuation cc val) (LIST objs) = resume cc $ LIST (val:objs)
+--resume (CatchContinuation cc body env) tag = evalBegin body env $ LabelContinuation cc tag
+--resume (ThrowContinuation cc form env) tag = catchLookup cc tag cc
 resume (ApplyContinuation cc f env) (LIST vals) = invoke f vals env cc
 resume (EmptyContinuation env) obj = (obj, env)
 resume _ _ = error "Resume"
@@ -137,6 +147,9 @@ evalSet var expr env cc = eval expr env $ SetContinuation cc var env
 evalLambda :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
 evalLambda args body env cc = resume cc $ LAMBDA args body env
 
+--evalCatch tag body env cc = eval tag env $ CatchContinuation cc body env
+--evalThrow tag form env cc = eval tag env $ ThrowContinuation cc form env
+
 evalApp :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
 evalApp f args env cc = eval f env $ FunContinuation cc args env
 
@@ -149,6 +162,8 @@ eval (LIST (SYMBOL "IF":expr:true:false)) env cc = evalIf expr true (head false)
 eval (LIST (SYMBOL "BEGIN":cdr)) env cc = evalBegin cdr env cc
 eval (LIST (SYMBOL "SETQ":SYMBOL var:expr)) env cc = evalSet var (head expr) env cc
 eval (LIST (SYMBOL "LAMBDA":args:body)) env cc = evalLambda args body env cc
+--eval (LIST (SYMBOL "CATCH":tag:body)) env cc = evalCatch tag body env cc
+--eval (LIST (SYMBOL "THROW":tag:val:_)) env cc = evalThrow tag val env cc
 eval (LIST (car:cdr)) env cc = evalApp car cdr env cc
 eval _ _ _ = error "Eval error"
 
@@ -178,12 +193,16 @@ prim "car" (LIST h:_) = head h
 prim "car" _ = error "Invalid car"
 prim "cdr" (LIST h:_) = LIST $ tail h
 prim "cdr" _ = error "Invalid cdr"
+prim "+" (NUM n1:NUM n2:_) = NUM $ n1 + n2
 prim _ _ = error "Invalid prim"
 
 globalEnv = [("T", t), ("NIL", nil),
+             ("+", PRIM "+"),
              ("CONS", PRIM "cons"),
              ("CAR", PRIM "car"),
-             ("CDR", PRIM "cdr")]
+             ("CDR", PRIM "cdr"),
+             ("CALL/CC", PRIM "call/cc")
+             ]
 
 repl :: IO ()
 repl = do
