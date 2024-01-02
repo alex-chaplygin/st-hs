@@ -9,6 +9,8 @@ data Object = SYMBOL String
   | NUM Int
   | LIST [Object]
   | LAMBDA Object [Object] Environment -- функция параметры тело окружение
+  | PRIM String
+  | CONT Continuation
   deriving (Eq)
 
                   -- имя значение остальные 
@@ -17,10 +19,13 @@ type Environment = [(String, Object)]
 data Continuation = IfContinuation Continuation Object Object Environment
                   | BeginContinuation Continuation [Object] Environment
                   | SetContinuation Continuation String Environment
-                  -- вычисление функции
+                  -- вычисление функции 
                   | FunContinuation Continuation [Object] Environment
-                  -- 
+                  -- применение функции после вычисления аргументов
                   | ApplyContinuation Continuation Object Environment
+                  | ArgContinuation Continuation [Object] Environment
+                  | GathContinuation Continuation Object
+                  | EmptyContinuation Environment
 
 data Result = OK Object
   | ERROR String
@@ -31,7 +36,7 @@ instance Show Object where
   show (NUM i) = (show i)
   show (LIST []) = "NIL"
   show (LIST l) = "(" ++ (concat $ intersperse " " $ map show l) ++ ")"
-  show (LAMBDA args body env) = "LAMBDA " ++ (show args) ++ " " ++ (concat $ intersperse " " $ map show body) ++ "env = " ++ (show env)
+  show (LAMBDA args body env) = "LAMBDA " ++ (show args) ++ " " ++ (concat $ intersperse " " $ map show body) ++ " env = " ++ (show env)
 
 isNotDigit c = c < '0' || c > '9'
 isMySymbol c = isSymbol c || c == '*' || c == '/' || c == '+' || c == '-'
@@ -58,51 +63,28 @@ parse s = readP_to_S obj s
 
 eval :: Object -> Environment -> Continuation -> (Object, Environment)
 evalBegin :: [Object] -> Environment -> Continuation -> (Object, Environment)
+resume :: Continuation -> Object -> (Object, Environment)
 
 -- обновление переменной в окружении
-update :: Environment -> String -> Continuation -> Object -> (Object, Environment)
+update :: Environment -> String -> Object -> Environment
 update env var val = update' var val env [] where
   update' var val [] env = (var, val):env
   update' var val ((key, obj):tail) env = if key == var then (key, val):tail else
-    (key, obj):update var val tail
+    (key, obj):update tail var val
 -- обновление окружения внутри продолжения
 updateCont :: Continuation -> String -> Object -> Continuation
 updateCont (IfContinuation cc o1 o2 env) var val = IfContinuation cc o1 o2 $ update env var val
 updateCont (BeginContinuation cc o env) var val = BeginContinuation cc o $ update env var val
-updateCont (SetContinuation cc s env) var val = BeginContinuation cc s $ update env var val
+updateCont (SetContinuation cc s env) var val = SetContinuation cc s $ update env var val
 updateCont (FunContinuation cc s env) var val = FunContinuation cc s $ update env var val
-
--- возобновление сохраненного продолжения
-resume :: Continuation -> Object -> (Object, Environment)
-resume (IfContinuation cc true _ env) (SYMBOL "T") = eval true env cc
-resume (IfContinuation cc _ false env) (LIST []) = eval false env cc
-resume (BeginContinuation cc (_:cdr) env) _ = evalBegin cdr env cc
-resume (SetContinuation _ var []) _ = error $ "Unknown variable" ++ $ show var
-resume (SetContinuation cc var env) val = resume (updateCont cc var val) val
-resume (FunContinuation cc args env) f = resume 
-
-evalQuote :: Object -> Environment -> Continuation -> (Object, Environment)
-evalQuote obj env cc = resume cc obj
-
-evalIf :: Object -> Object -> Object -> Environment -> Continuation -> (Object, Environment)
-evalIf expr true false env cc = eval expr env $ IFCONT cc true false env
-
-evalBegin :: [Object] -> Environment -> Continuation -> (Object, Environment)
-evalBegin [] env cc = resume cc $ LIST []
-evalBegin (car:[]) env cc = eval car env cc
-evalBegin (car:cdr) env cc = eval car env $ BeginContinuation cc (car:cdr) env
-
-evalVar :: String -> Environment -> Continuation -> (Object, Environment)
-evalVar n [] _ = error $ "Unknown var" ++ (show n)
-evalVar n ((var, val):cdr) cc = if n == var then resume cc val
-  else evalVar n cdr cc
-
-evalSet :: String -> Object -> Environment -> Continuation -> (Object, Environment)
-evalSet var expr env cc = eval expr env $ SetContinuation cc var env
--- Ламбда    аргументы
-evalLambda :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
-evalLambda args body env cc = resume cc $ LAMBDA args body env
-
+updateCont (ApplyContinuation cc s env) var val = ApplyContinuation cc s $ update env var val
+updateCont (ArgContinuation cc s env) var val = ArgContinuation cc s $ update env var val
+updateCont (EmptyContinuation env) var val = EmptyContinuation $ update env var val
+updateCont (GathContinuation cc s) var val = GathContinuation cc s
+-- вычисление аргументов при вызове функции
+evalArgs :: [Object] -> Environment -> Continuation -> (Object, Environment)
+evalArgs [] _ cc = resume cc $ LIST []
+evalArgs (arg:t) env cc = eval arg env $ ArgContinuation cc t env
 -- создать окружение для функции (переменная, значение)
 makeEnv :: Object -> [Object] -> Environment
 makeEnv (LIST params) values = if length params /= length values then
@@ -111,25 +93,64 @@ makeEnv (LIST params) values = if length params /= length values then
   where fromAtom (SYMBOL a) = a
         fromAtom _ = error "Not atoms in params"
 makeEnv _ _ = error "No params list"             
-
 -- вызов функции ламбда->аргументы->окружение->продолжение
 invoke :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
 invoke (LAMBDA args body e) vals env cc = let newEnv = makeEnv args vals ++ e in
-  evalBegin body newEnv cc
+   evalBegin body newEnv cc
+invoke (CONT cc) vals env cc = resume cc $ head vals
+-- вызов продолжить  с текущим продолжением
+invoke (PRIM "call") vals env cc = invoke (head vals) [CONT cc] env cc
+-- вызов примитива
+invoke (PRIM f) vals _ cc = resume cc $ prim f vals
+invoke _ _ _ _ = error "Invoke"
+-- возобновление сохраненного продолжения
+resume (IfContinuation cc true _ env) (SYMBOL "T") = eval true env cc
+resume (IfContinuation cc _ false env) (LIST []) = eval false env cc
+resume (BeginContinuation cc (_:cdr) env) _ = evalBegin cdr env cc
+resume (SetContinuation _ var []) _ = error $ "Unknown variable" ++ (show var)
+resume (SetContinuation cc var env) val = resume (updateCont cc var val) val
+resume (FunContinuation cc args env) f = evalArgs args env $ ApplyContinuation cc f env
+resume (ArgContinuation cc args env) val = evalArgs args env $ GathContinuation cc val
+resume (GathContinuation cc val) (LIST objs) = resume cc $ LIST (val:objs)
+resume (ApplyContinuation cc f env) (LIST vals) = invoke f vals env cc
+resume (EmptyContinuation env) obj = (obj, env)
+resume _ _ = error "Resume"
+
+evalQuote :: Object -> Environment -> Continuation -> (Object, Environment)
+evalQuote obj env cc = resume cc obj
+
+evalIf :: Object -> Object -> Object -> Environment -> Continuation -> (Object, Environment)
+evalIf expr true false env cc = eval expr env $ IfContinuation cc true false env
+
+evalBegin [] env cc = resume cc $ LIST []
+evalBegin (car:[]) env cc = eval car env cc
+evalBegin (car:cdr) env cc = eval car env $ BeginContinuation cc (car:cdr) env
+
+evalVar :: String -> Environment -> Continuation -> (Object, Environment)
+evalVar n [] _ = error $ "Unknown var" ++ (show n)
+evalVar n ((var, val):cdr) cc = if n == var then resume cc val
+   else evalVar n cdr cc
+
+evalSet :: String -> Object -> Environment -> Continuation -> (Object, Environment)
+evalSet var expr env cc = eval expr env $ SetContinuation cc var env
+-- -- Ламбда    аргументы
+evalLambda :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
+evalLambda args body env cc = resume cc $ LAMBDA args body env
 
 evalApp :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
 evalApp f args env cc = eval f env $ FunContinuation cc args env
 
-eval (NUM i) env cc = NUM i
-eval (LIST []) env cc = LIST []
+eval (NUM i) env cc = resume cc $ NUM i
+eval (LIST []) env cc = resume cc $ LIST []
 eval (SYMBOL var) env cc = evalVar var env cc
--- особые формы     
+-- -- особые формы     
 eval (LIST (SYMBOL "QUOTE":cdr)) env cc = evalQuote (head cdr) env cc
 eval (LIST (SYMBOL "IF":expr:true:false)) env cc = evalIf expr true (head false) env cc
 eval (LIST (SYMBOL "BEGIN":cdr)) env cc = evalBegin cdr env cc
 eval (LIST (SYMBOL "SETQ":SYMBOL var:expr)) env cc = evalSet var (head expr) env cc
 eval (LIST (SYMBOL "LAMBDA":args:body)) env cc = evalLambda args body env cc
 eval (LIST (car:cdr)) env cc = evalApp car cdr env cc
+eval _ _ _ = error "Eval error"
 
 process :: S.StateT Environment IO ()
 process = do
@@ -141,11 +162,28 @@ process = do
     let ob = parse str
     if ob == [] then do
       S.liftIO $ putStrLn "Ошибка ввода"
-      else do
-      let (res, env) = eval e (fst $ last $ ob)
+    else do
+      let (res, env) = eval (fst $ last $ ob) e $ EmptyContinuation e
       S.liftIO $ putStrLn (show res)
       S.put env
     process
+
+t = SYMBOL "T"
+nil = LIST []
+prim "cons" (a:b) = case head b of
+  LIST c -> LIST $ [a] ++ c
+  _ -> error "invalid list in cons"
+prim "cons" _ = error "Invalid cons"
+prim "car" (LIST h:_) = head h 
+prim "car" _ = error "Invalid car"
+prim "cdr" (LIST h:_) = LIST $ tail h
+prim "cdr" _ = error "Invalid cdr"
+prim _ _ = error "Invalid prim"
+
+globalEnv = [("T", t), ("NIL", nil),
+             ("CONS", PRIM "cons"),
+             ("CAR", PRIM "car"),
+             ("CDR", PRIM "cdr")]
 
 repl :: IO ()
 repl = do
