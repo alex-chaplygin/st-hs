@@ -27,9 +27,14 @@ data Continuation = IfContinuation Continuation Object Object Environment
                   | ArgContinuation Continuation [Object] Environment
                   -- сохранение вычисленного аргумента
                   | GathContinuation Continuation Object
---                  | CatchContinuation Continuation [Object] Environment
---                  | LabelContinuation Continuation Object
---                  | ThrowContinuation Continuation Object Environment
+                  -- установка метки                тело 
+                  | CatchContinuation Continuation [Object] Environment
+                  -- после вычисления тела          тег
+                  | LabelContinuation Continuation Object
+                  -- после выброса исключения       форма
+                  | ThrowContinuation Continuation Object Environment
+                  -- после вычисления значения исключения
+                  | ThrowingContinuation Continuation Object Continuation
                   -- начальное пустое продолжение
                   | EmptyContinuation Environment
                   deriving (Eq, Show)
@@ -81,13 +86,13 @@ update env var val = update' var val env [] where
     (key, obj):update tail var val
 -- обновление окружения внутри продолжения
 updateCont :: Continuation -> String -> Object -> Continuation
---updateCont (IfContinuation cc o1 o2 env) var val = IfContinuation cc o1 o2 $ update env var val
---updateCont (BeginContinuation cc o env) var val = BeginContinuation cc o $ update env var val
+updateCont (IfContinuation cc o1 o2 env) var val = IfContinuation cc o1 o2 $ update env var val
+updateCont (BeginContinuation cc o env) var val = BeginContinuation cc o $ update env var val
 updateCont (SetContinuation cc s env) var val = SetContinuation cc s $ update env var val
---updateCont (FunContinuation cc s env) var val = FunContinuation cc s $ update env var val
---updateCont (ApplyContinuation cc s env) var val = ApplyContinuation cc s $ update env var val
---updateCont (ArgContinuation cc s env) var val = ArgContinuation cc s $ update env var val
---updateCont (EmptyContinuation env) var val = EmptyContinuation $ update env var val
+updateCont (FunContinuation cc s env) var val = FunContinuation cc s $ update env var val
+updateCont (ApplyContinuation cc s env) var val = ApplyContinuation cc s $ update env var val
+updateCont (ArgContinuation cc s env) var val = ArgContinuation cc s $ update env var val
+updateCont (EmptyContinuation env) var val = EmptyContinuation $ update env var val
 updateCont c _ _ = c
 -- вычисление аргументов при вызове функции
 evalArgs :: [Object] -> Environment -> Continuation -> (Object, Environment)
@@ -111,6 +116,21 @@ invoke (PRIM "call/cc") vals env cc = invoke (head vals) [CONT cc] env cc
 -- вызов примитива
 invoke (PRIM f) vals _ cc = resume cc $ prim f vals
 invoke _ _ _ _ = error "Invoke"
+-- поиск тела функции под динамической меткой
+catchLookup :: Continuation -> Object -> Continuation -> (Object, Environment)
+catchLookup (IfContinuation cc _ _ _) tag tc = catchLookup cc tag tc
+catchLookup (BeginContinuation cc _ _) tag tc = catchLookup cc tag tc
+catchLookup (FunContinuation cc _ _) tag tc = catchLookup cc tag tc
+catchLookup (ApplyContinuation cc _ _) tag tc = catchLookup cc tag tc
+catchLookup (ArgContinuation cc _ _) tag tc = catchLookup cc tag tc
+catchLookup (GathContinuation cc _) tag tc = catchLookup cc tag tc
+catchLookup (CatchContinuation cc _ _) tag tc = catchLookup cc tag tc
+catchLookup (ThrowContinuation cc _ _) tag tc = catchLookup cc tag tc
+catchLookup (ThrowingContinuation cc _ _) tag tc = catchLookup cc tag tc
+catchLookup lc@(LabelContinuation cc t) tag tc@(ThrowContinuation c2 form env)  =
+  if t == tag then eval form env $ ThrowingContinuation tc tag lc
+  else catchLookup cc tag tc
+catchLookup (EmptyContinuation _) tag _ = error $ "No associated catch: " ++ (show tag)
 -- возобновление сохраненного продолжения
 resume (IfContinuation cc true _ env) (SYMBOL "T") = eval true env cc
 resume (IfContinuation cc _ false env) (LIST []) = eval false env cc
@@ -120,11 +140,13 @@ resume (SetContinuation cc var env) val = resume (updateCont cc var val) val
 resume (FunContinuation cc args env) f = evalArgs args env $ ApplyContinuation cc f env
 resume (ArgContinuation cc args env) val = evalArgs args env $ GathContinuation cc val
 resume (GathContinuation cc val) (LIST objs) = resume cc $ LIST (val:objs)
---resume (CatchContinuation cc body env) tag = evalBegin body env $ LabelContinuation cc tag
---resume (ThrowContinuation cc form env) tag = catchLookup cc tag cc
+resume (CatchContinuation cc body env) tag = evalBegin body env $ LabelContinuation cc tag
+resume c@(ThrowContinuation cc form env) tag = catchLookup c tag c
+resume (ThrowingContinuation cc tag c2) v = resume c2 v
+resume (LabelContinuation cc tag) obj = resume cc obj
 resume (ApplyContinuation cc f env) (LIST vals) = invoke f vals env cc
 resume (EmptyContinuation env) obj = (obj, env)
-resume _ _ = error "Resume"
+--resume _ _ = error "Resume"
 
 evalQuote :: Object -> Environment -> Continuation -> (Object, Environment)
 evalQuote obj env cc = resume cc obj
@@ -147,8 +169,8 @@ evalSet var expr env cc = eval expr env $ SetContinuation cc var env
 evalLambda :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
 evalLambda args body env cc = resume cc $ LAMBDA args body env
 
---evalCatch tag body env cc = eval tag env $ CatchContinuation cc body env
---evalThrow tag form env cc = eval tag env $ ThrowContinuation cc form env
+evalCatch tag body env cc = eval tag env $ CatchContinuation cc body env
+evalThrow tag form env cc = eval tag env $ ThrowContinuation cc form env
 
 evalApp :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
 evalApp f args env cc = eval f env $ FunContinuation cc args env
@@ -162,8 +184,8 @@ eval (LIST (SYMBOL "IF":expr:true:false)) env cc = evalIf expr true (head false)
 eval (LIST (SYMBOL "BEGIN":cdr)) env cc = evalBegin cdr env cc
 eval (LIST (SYMBOL "SETQ":SYMBOL var:expr)) env cc = evalSet var (head expr) env cc
 eval (LIST (SYMBOL "LAMBDA":args:body)) env cc = evalLambda args body env cc
---eval (LIST (SYMBOL "CATCH":tag:body)) env cc = evalCatch tag body env cc
---eval (LIST (SYMBOL "THROW":tag:val:_)) env cc = evalThrow tag val env cc
+eval (LIST (SYMBOL "CATCH":tag:body)) env cc = evalCatch tag body env cc
+eval (LIST (SYMBOL "THROW":tag:val:_)) env cc = evalThrow tag val env cc
 eval (LIST (car:cdr)) env cc = evalApp car cdr env cc
 eval _ _ _ = error "Eval error"
 
