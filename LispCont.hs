@@ -180,7 +180,7 @@ eval (LIST []) env cc = resume cc $ LIST []
 eval (SYMBOL var) env cc = evalVar var env cc
 -- -- особые формы     
 eval (LIST (SYMBOL "QUOTE":cdr)) env cc = evalQuote (head cdr) env cc
-eval (LIST (SYMBOL "IF":expr:true:false:[])) env cc = evalIf expr true (head false) env cc
+eval (LIST (SYMBOL "IF":expr:true:false)) env cc = evalIf expr true (head false) env cc
 eval (LIST (SYMBOL "BEGIN":cdr)) env cc = evalBegin cdr env cc
 eval (LIST (SYMBOL "SETQ":SYMBOL var:expr)) env cc = evalSet var (head expr) env cc
 eval (LIST (SYMBOL "LAMBDA":args:body)) env cc = evalLambda args body env cc
