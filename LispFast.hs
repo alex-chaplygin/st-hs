@@ -13,11 +13,11 @@ data Object = SYMBOL String
   deriving (Eq)
 
 type Frame = Array Int Object -- массив значений (запись активации)
-data Env = Env -- окружение
-  { nextEnv :: Env -- следующий кадр
+data FrameList = FrameList -- записи активаций
+  { nextFrame :: Env -- следующий кадр
   , frameEnv :: Frame -- значения аргументов при вызове функций
   }
-type Cont = Object -> Env -> Mem -> (Object, Env, Mem)-- продолжение
+type Cont = Object -> Env -> (Object, Env)-- продолжение
 
 data Result = OK Object
   | ERROR String
@@ -57,8 +57,32 @@ globalEnv :: Env
 globalEnv "T" = 1
 globalEnv "NIL" = 2
 globalEnv var = error $"Нет переменной " ++ (show var)
-
-meaning :: Object -> Env -> Cont -> Mem -> (Object, Env, Mem)
+-- анализатор программы
+meaning :: Object -> Env -> FrameList -> Cont -> Object
+meaning o@(NUM i) e = meaning-quote o e
+meaning (LIST (SYMBOL "QUOTE":o:[])) e = meaning-quote o e
+meaning (SYMBOL name) e = meaning-reference name e
+meaning (LIST (SYMBOL "LAMBDA":args:body)) e = meaning-abstraction args body e
+meaning (LIST (SYMBOL "IF":expr:t:f:[])) e = meaning-alternative expr t f e
+meaning (LIST (SYMBOL "BEGIN":s)) e = meaning-sequence s e
+meaning (LIST (SYMBOL "SETQ":SYMBOL var:exp:[])) e = meaning-assignment var exp e
+meaning (LIST (car:cdr)) e = meaning-application car cdr e
+-- цитирование
+meaning-quote o _ = \_ c -> c o
+-- ветвление
+meaning-alternative :: Object -> Env -> FrameList -> Cont -> Object
+meaning-alternative e1 e2 e3 env = let m1 = meaning e1 env
+                                       m2 = meaning e2 env
+                                       m3 = meaning e3 env in
+                                     \sr c -> m1 sr $ \v -> (case v of
+                                       SYMBOL "T" -> m2
+                                       LIST [] -> m3
+                                       _ -> error "IF") $ sr c
+-- последовательность
+meaning-sequence (o:[]) e = meaning o e
+meaning-sequence (o:t) e = let m1 = meaning o e
+                               mt = meaning-sequence t e in
+                             \sr c -> m1 sr $ \v -> mt sr c
 -- вычисление последовательности
 evalBegin :: [Object] -> Env -> Cont -> Mem -> (Object, Env, Mem)
 evalBegin (o:[]) env cc mem = eval o env cc mem
@@ -75,23 +99,6 @@ deepFetch e i j = deepFetch e $ i - 1 $ j
 deepUpdate :: Env -> Int -> Int -> Object -> Env
 deepUpdate e 0 j v = Env {nextEnv = nextEnv e, frameEnv = frameEnv e // [(j, o)]}
 deepUpdate e i j v = Env {frameEnv = frameEnv e, nextEnv = deepUpdate e$i-1$jv}
-
-eval (NUM i) e c m = c (NUM i) e m
-eval (LIST []) e c m = c (LIST []) e m
-eval (SYMBOL name) env cont mem = cont (mem $ env name) env mem
-eval (LIST (SYMBOL "QUOTE":cdr)) e c m = c (head cdr) e m
-eval (LIST (SYMBOL "BEGIN":cdr)) env cc mem = evalBegin cdr env cc mem
-eval (LIST (SYMBOL "IF":expr:t:f:[])) env cc mem = eval expr env
-  (\e _ m -> (\p -> p (eval t env cc m) (eval f env cc m)) $ toBool e) mem
-eval (LIST (SYMBOL "SETQ":SYMBOL var:expr:[])) env cc mem = eval expr env (\v e m -> let e' = extendEnv env m var in cc v e' $ extendMem m (e' var) v) mem
-eval (LIST (SYMBOL "LAMBDA":args:body)) env c mem = c (LAMBDA args body) env mem
-eval (LIST (SYMBOL "CONS":car:cdr:[])) e c m =
-  let (car', _, _) = eval car e c m
-      (LIST cdr', _, _) = eval cdr e c m in c (LIST (car':cdr')) e m
-eval (LIST (SYMBOL "CAR":l:[])) e c m = let (LIST l', _, _) = eval l e c m in c (head l') e m
-eval (LIST (SYMBOL "CDR":l:[])) e c m = let (LIST l', _, _) = eval l e c m in c (LIST $ tail l') e m
-eval (LIST (car:cdr)) env c mem = eval car env (\o e m -> applyFun o cdr e c m) mem
-eval _ _ _ _ = error "Eval error"
 
 process :: S.StateT (Env, Mem) IO ()
 process = do
