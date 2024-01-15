@@ -2,7 +2,7 @@
 import Text.ParserCombinators.ReadP
 import Data.Char
 import Data.List
-import Data.Map (Map)
+import Data.Vector (Vector, (!), (//), empty, cons)
 import Data.Hashable
 import qualified Control.Monad.State as S
 
@@ -12,12 +12,9 @@ data Object = SYMBOL String
   | LAMBDA Object [Object] -- функция параметры тело окружение
   deriving (Eq)
 
-type Frame = Array Int Object -- массив значений (запись активации)
-data FrameList = FrameList -- записи активаций
-  { nextFrame :: Env -- следующий кадр
-  , frameEnv :: Frame -- значения аргументов при вызове функций
-  }
-type Cont = Object -> Env -> (Object, Env)-- продолжение
+type Env = Vector Object -- массив значений (запись активации)
+type FrameList = [Env]
+type Cont = Object -> (Object, Env)-- продолжение
 
 data Result = OK Object
   | ERROR String
@@ -53,56 +50,64 @@ qexpr = do {mychar '\''; e <- sexpr; return $ LIST $ (SYMBOL "QUOTE") : [e]
            } +++ sexpr
 parse s = readP_to_S obj s
 -- глобальное окружение - пустое в начале
-globalEnv :: Env
-globalEnv "T" = 1
-globalEnv "NIL" = 2
-globalEnv var = error $"Нет переменной " ++ (show var)
+--globalEnv :: Env
+--globalEnv = "T" = 1
+--globalEnv "NIL" = 2
+--globalEnv var = error $"Нет переменной " ++ (show var)
 -- анализатор программы
-meaning :: Object -> Env -> FrameList -> Cont -> Object
-meaning o@(NUM i) e = meaning-quote o e
-meaning (LIST (SYMBOL "QUOTE":o:[])) e = meaning-quote o e
-meaning (SYMBOL name) e = meaning-reference name e
-meaning (LIST (SYMBOL "LAMBDA":args:body)) e = meaning-abstraction args body e
-meaning (LIST (SYMBOL "IF":expr:t:f:[])) e = meaning-alternative expr t f e
-meaning (LIST (SYMBOL "BEGIN":s)) e = meaning-sequence s e
-meaning (LIST (SYMBOL "SETQ":SYMBOL var:exp:[])) e = meaning-assignment var exp e
-meaning (LIST (car:cdr)) e = meaning-application car cdr e
+meaning :: Object -> Env -> FrameList -> Cont -> (Object, Env)
+meaning o@(NUM i) e = meaningQuote o e
+meaning (LIST (SYMBOL "QUOTE":o:[])) e = meaningQuote o e
+-- meaning (SYMBOL name) e = meaningReference name e
+--meaning (LIST (SYMBOL "LAMBDA":args:body)) e = meaningAbstraction args body e
+meaning (LIST (SYMBOL "IF":expr:t:f:[])) e = meaningAlternative expr t f e
+meaning (LIST (SYMBOL "BEGIN":s)) e = meaningSequence s e
+--meaning (LIST (SYMBOL "SETQ":SYMBOL var:exp:[])) e = meaning-assignment var exp e
+--meaning (LIST (car:cdr)) e = meaningApplication car cdr e
 -- цитирование
-meaning-quote o _ = \_ c -> c o
+meaningQuote o e = \sr c -> c o
 -- ветвление
-meaning-alternative :: Object -> Env -> FrameList -> Cont -> Object
-meaning-alternative e1 e2 e3 env = let m1 = meaning e1 env
-                                       m2 = meaning e2 env
-                                       m3 = meaning e3 env in
-                                     \sr c -> m1 sr $ \v -> (case v of
-                                       SYMBOL "T" -> m2
-                                       LIST [] -> m3
-                                       _ -> error "IF") $ sr c
+meaningAlternative e1 e2 e3 env = let m1 = meaning e1 env
+                                      m2 = meaning e2 env
+                                      m3 = meaning e3 env in
+                                    \sr c -> m1 sr $ \v -> (case v of
+                                        SYMBOL "T" -> m2
+                                        LIST [] -> m3
+                                        _ -> error "IF") sr c
 -- последовательность
-meaning-sequence (o:[]) e = meaning o e
-meaning-sequence (o:t) e = let m1 = meaning o e
-                               mt = meaning-sequence t e in
+meaningSequence (o:[]) e = meaning o e
+meaningSequence (o:t) e = let m1 = meaning o e
+                              mt = meaningSequence t e in
                              \sr c -> m1 sr $ \v -> mt sr c
--- вычисление последовательности
-evalBegin :: [Object] -> Env -> Cont -> Mem -> (Object, Env, Mem)
-evalBegin (o:[]) env cc mem = eval o env cc mem
-evalBegin (o:t) env cc mem = eval o env (\_ e m -> evalBegin t e cc m) mem
+-- применение функции
+-- meaningApplication f args env = let m = meaning f env
+--                                     vals = meaningArgs args env $ length args in
+--                                   \sr c -> m sr $ \f' -> vals sr $ \v' -> f v' c
+-- -- вычисление аргументов
+-- meaningArgs [] _ _ = \sr c -> c empty
+-- meaningArgs (car:cdr) env size = let m = meaning car env
+--                                      mt = meaningArgs cdr env
+--                                      idx = size - length cdr - 1 in
+--                                    \sr c -> m sr $ \v -> mt sr $ \v' -> set-frame
+-- -- абстракция
+-- meaningAbstraction (LIST args) body env = let arity = length args
+--                                               arity' = arity + 1
+--                                               env' = cons args env
+--                                               m = meaningSequence body env' in
+--                                             \sr c -> c $ \o c' -> if length o == arity' then m (o : sr) c' else error "Неверное число аргументов"
 
--- расширение окружения (создание новой записи активации)
-extendEnv :: Env -> Frame -> Env
-extendEnv e fr = Env {frameEnv = fr, nextEnv = e}
 -- глубокий поиск переменной - номер кадра - номер записи
-deepFetch :: Env -> Int -> Int -> Object
-deepFetch e 0 j = frameEnv e ! j
-deepFetch e i j = deepFetch e $ i - 1 $ j
+deepFetch :: FrameList -> Int -> Int -> Object
+deepFetch (car:cdr) 0 j = car ! j
+deepFetch (car:cdr) i j = deepFetch cdr (i - 1) j
 -- глубокое обновление переменной
-deepUpdate :: Env -> Int -> Int -> Object -> Env
-deepUpdate e 0 j v = Env {nextEnv = nextEnv e, frameEnv = frameEnv e // [(j, o)]}
-deepUpdate e i j v = Env {frameEnv = frameEnv e, nextEnv = deepUpdate e$i-1$jv}
+deepUpdate :: FrameList -> Int -> Int -> Object -> FrameList
+deepUpdate (car:cdr) 0 j v = (car // [(j, v)]) : cdr
+deepUpdate (car:cdr) i j v = deepUpdate cdr (i-1) j v
 
-process :: S.StateT (Env, Mem) IO ()
+process :: S.StateT Env IO ()
 process = do
-  (e, mem) <- S.get -- получаем текущее окружение
+  e <- S.get -- получаем текущее окружение
   S.liftIO $ putStr "> "
   str <- S.liftIO $ getLine
   if str == "q" then return ()
@@ -111,13 +116,13 @@ process = do
     if ob == [] then do
       S.liftIO $ putStrLn "Ошибка ввода"
       else do
-      let (res, e', mem') = eval (fst $ last $ ob) e (\o e m -> (o, e, m)) mem
+      let (res, e') = meaning (fst $ last $ ob) e [] $ \o -> (o, e)
       S.liftIO $ putStrLn (show res)
-      S.put (e', mem')
+      S.put e'
     process
 
 repl :: IO ()
 repl = do
-  res <- S.runStateT process (globalEnv, initMem)
+  res <- S.runStateT process empty
   return ()
 main = repl
