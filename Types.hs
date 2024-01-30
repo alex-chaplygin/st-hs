@@ -1,6 +1,7 @@
-module Types (Object(..), Code(..), Env) where
+module Types (Object(..), Code(..), Env, FrameList) where
 
 import Data.List
+import qualified Data.Vector as V
 
 data Object = SYMBOL String
   | NUM Int
@@ -27,6 +28,7 @@ data Code = CONST Object -- константа
   deriving (Show)
 
 type Env = [[String]] -- окружение - список кадров из переменных
+type FrameList = [V.Vector Object] -- записи активаций
 
 instance Show Object where
   show (SYMBOL s) = s

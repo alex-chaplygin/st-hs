@@ -2,13 +2,14 @@ import qualified Data.Vector as V
 import qualified Control.Monad.State as S
 import Parser
 import Compiler
-import Types (Object(..))
+import Types
+import VM
 
 data Result = OK Object
   | ERROR String
   deriving Eq
 
-process :: S.StateT Int IO ()
+process :: S.StateT FrameList IO ()
 process = do
   S.liftIO $ putStr "> "
   str <- S.liftIO $ getLine
@@ -18,12 +19,14 @@ process = do
     if ob == [] then do
       S.liftIO $ putStrLn "Ошибка ввода"
       else do
-      let res = meaning (fst $ last $ ob) [] True in
+      let code = meaning (fst $ last $ ob) [] True in do
+        S.liftIO $ putStrLn (show code)
+        res <- run code
         S.liftIO $ putStrLn (show res)
     process
 
 repl :: IO ()
 repl = do
-  res <- S.runStateT process 0
+  res <- S.runStateT process []
   return ()
 main = repl
