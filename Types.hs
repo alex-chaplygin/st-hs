@@ -6,6 +6,7 @@ import qualified Data.Vector as V
 data Object = SYMBOL String
   | NUM Int
   | LIST [Object]
+  | CLOS Code FrameList -- замыкание
   deriving (Eq)
 -- скомпилированный код
 data Code = CONST Object -- константа
@@ -25,7 +26,7 @@ data Code = CONST Object -- константа
   | CAR Code
   | ADD Code Code
   | MUL Code Code
-  deriving (Show)
+  deriving (Show, Eq)
 
 type Env = [[String]] -- окружение - список кадров из переменных
 type FrameList = [V.Vector Object] -- записи активаций
