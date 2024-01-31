@@ -11,6 +11,16 @@ run (VAR_SH j) = do
 run (VAR_DEEP i j) = do
   fr <- S.get
   return $ (fr !! i) V.! j
+run (SET_VAR_SH j c) = do
+  fr <- S.get
+  c' <- run c
+  S.put $ (head fr V.// [(j, c')]):tail fr
+  return c'
+run (SET_VAR_DEEP i j c) = do
+  fr <- S.get
+  c' <- run c
+  S.put $ deepUpdate fr i j c'
+  return c'
 run (GLOBAL 0) = return $ SYMBOL "T"
 run (GLOBAL 1) = return $ LIST []
 run (IF cond t f) = do
@@ -37,3 +47,11 @@ run (ADD c1 c2) = do
   (NUM n1) <- run c1
   (NUM n2) <- run c2
   return $ NUM $ n1 + n2
+run (MUL c1 c2) = do
+  (NUM n1) <- run c1
+  (NUM n2) <- run c2
+  return $ NUM $ n1 * n2
+-- глубокое обновление переменной
+deepUpdate :: FrameList -> Int -> Int -> Object -> FrameList
+deepUpdate (car:cdr) 0 j v = (car V.// [(j, v)]) : cdr
+deepUpdate (car:cdr) i j v = car : deepUpdate cdr (i-1) j v
