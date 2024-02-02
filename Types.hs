@@ -23,15 +23,15 @@ data Code = CONST Object -- константа
   | CALL Code Code -- обычный вызов функции
   | ALLOC Int -- создание кадра активации (размер)
   | STORE Code Code Int -- сохранение значения аргумента в кадр активации
-  | CAR Code
-  | ADD Code Code
-  | MUL Code Code
+  | PRIM0 Int -- вызовы примитивов
+  | PRIM1 Int Code
+  | PRIM2 Int Code Code
   deriving (Show, Eq)
 
 type Env = [[String]] -- окружение - список кадров из переменных
 type GlobalEnv = [(String, Code)] -- глобальное окружение
 type FrameList = [V.Vector Object] -- записи активаций
-type Primitives = [(String, Object->Code)] -- примитивные функции
+type Primitive = (String, Int, [Object]->Object) -- примитивные функции
 
 instance Show Object where
   show (SYMBOL s) = s

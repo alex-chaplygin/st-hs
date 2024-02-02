@@ -1,4 +1,4 @@
-module Compiler (meaning) where
+module Compiler (meaning, primitives) where
 import Control.Applicative
 import Control.Monad.State
 import Types
@@ -6,7 +6,6 @@ import Types
 data Var = Local Int Int -- ссылка на локальную переменную по 2 координатам 
   | Global Int -- сылка на глобальную переменную
 
---globalEnv var = error $"Нет переменной " ++ (show var)
 -- анализатор программы
 meaning :: Object -> Env -> Bool -> StateT (FrameList, GlobalEnv) IO Code
 meaning o@(NUM i) e t = meaningQuote o e t
@@ -16,15 +15,6 @@ meaning (LIST (SYMBOL "LAMBDA":(LIST args):body)) e t = meaningAbstraction args 
 meaning (LIST (SYMBOL "IF":expr:t:f:[])) e t' = meaningAlternative expr t f e t'
 meaning (LIST (SYMBOL "BEGIN":s)) e t = meaningSequence s e t
 meaning (LIST (SYMBOL "SETQ":SYMBOL var:exp:[])) e t = meaningAssignment var exp e t
-meaning (LIST (SYMBOL "CAR":l:[])) e t = meaning l e False >>= \c -> return$CAR c 
-meaning (LIST (SYMBOL "+":n:n2:[])) e t = do
-  a1 <- meaning n e False
-  a2 <- meaning n2 e False
-  return $ ADD a1 a2
-meaning (LIST (SYMBOL "*":n:n2:[])) e t = do
-  a1 <- meaning n e False
-  a2 <- meaning n2 e False
-  return $ MUL a1 a2
 meaning (LIST (car:cdr)) e t = meaningApplication car cdr e t
 -- цитирование
 meaningQuote o e t = return $ CONST o
@@ -51,19 +41,26 @@ meaningSequence (o:t) e t' = do
   return $ SEQ m1 mt
 -- присваивание
 meaningAssignment var expr env t = do
-  m <- meaning expr env False
   (fr, glEnv) <- get
   case kindVar env var glEnv of
     Nothing -> do
       put (fr, glEnv ++ [(var, CONST $ NUM 0)])
+      m <- meaning expr env False
       return $ SET_GLOBAL (length glEnv) m
-    Just (Global i) -> return $ SET_GLOBAL i m
-    Just (Local i j) -> return $ if i == 0 then SET_VAR_SH j m else SET_VAR_DEEP i j m
+    Just (Global i) -> meaning expr env False >>= \m -> return $ SET_GLOBAL i m
+    Just (Local i j) -> meaning expr env False >>= \m -> return $ if i == 0 then SET_VAR_SH j m else SET_VAR_DEEP i j m
 -- применение функции
 meaningApplication f args env t = do
-  m <- meaning f env False
-  vals <- meaningArgs args env (length args) False
-  return $ if t then TAIL_CALL m vals else CALL m vals
+  case f of
+    SYMBOL n -> case isPrimitive n of
+      Just (i, arity) -> if arity /= length args then error "Incorrect arity"
+        else meaningPrimitive i arity args env t
+      Nothing -> go
+    _ -> go
+  where go = do
+          m <- meaning f env False
+          vals <- meaningArgs args env (length args) False
+          return $ if t then TAIL_CALL m vals else CALL m vals
 -- вычисление аргументов
 meaningArgs [] _ size _ = return $ ALLOC size
 meaningArgs (car:cdr) env size t = do
@@ -71,6 +68,14 @@ meaningArgs (car:cdr) env size t = do
   mt <- meaningArgs cdr env size t
   let idx = size - length cdr - 1
   return $ STORE m mt idx
+-- вызов примитива
+meaningPrimitive num arity args env t = case arity of
+  0 -> return $ PRIM0 num
+  1 -> do meaning (head args) env False >>= \m -> return $ PRIM1 num m
+  2 -> do
+    m1 <- meaning (head args) env False
+    m2 <- meaning (head $ tail args) env False
+    return $ PRIM2 num m1 m2
 -- абстракция
 meaningAbstraction args body env t = do
   let arity = length args
@@ -86,3 +91,16 @@ kindVar env name globEnv = localVar env 0 <|> globalVar where
   globalVar = scan 0 globEnv where
     scan _ [] = Nothing
     scan i ((n,v):cdr) = if n == name then Just (Global i) else scan (i + 1) cdr
+
+primitives = [("+", 2, \[NUM x, NUM y] -> NUM $ x + y),
+              ("-", 2, \[NUM x, NUM y] -> NUM $ x - y),
+              ("*", 2, \[NUM x, NUM y] -> NUM $ x * y),
+              ("=", 2, \[NUM x, NUM y] -> if x == y then SYMBOL "T" else LIST[]),
+              ("CAR", 1, \[LIST l] -> head l),
+              ("CDR", 1, \[LIST l] -> LIST $ tail l),
+              ("CONS", 2, \[o, LIST l] -> LIST $ o:l)
+              ]
+-- поиск примитива             
+isPrimitive n = scan 0 primitives where
+  scan _ [] = Nothing
+  scan i ((name, ar, _):t) = if n == name then Just (i, ar) else scan (i+1) t
