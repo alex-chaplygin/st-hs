@@ -1,6 +1,7 @@
-module Types (Object(..), Code(..), Env, FrameList) where
+module Types (Object(..), Code(..), Env, GlobalEnv, FrameList) where
 
 import Data.List
+import Data.Array
 import qualified Data.Vector as V
 
 data Object = SYMBOL String
