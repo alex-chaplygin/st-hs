@@ -1,6 +1,6 @@
 module Compiler (meaning) where
 import Control.Applicative
-import qualified Control.Monad.State as S
+import Control.Monad.State
 import Types
 -- виды переменных
 data Var = Local Int Int -- ссылка на локальную переменную по 2 координатам 
@@ -8,7 +8,7 @@ data Var = Local Int Int -- ссылка на локальную перемен�
 
 --globalEnv var = error $"Нет переменной " ++ (show var)
 -- анализатор программы
-meaning :: Object -> Env -> Bool -> S.StateT (FrameList, GlobalEnv) IO Code
+meaning :: Object -> Env -> Bool -> StateT (FrameList, GlobalEnv) IO Code
 meaning o@(NUM i) e t = meaningQuote o e t
 meaning (LIST (SYMBOL "QUOTE":o:[])) e t = meaningQuote o e t
 meaning (SYMBOL name) e t = meaningReference name e
@@ -29,9 +29,9 @@ meaning (LIST (car:cdr)) e t = meaningApplication car cdr e t
 -- цитирование
 meaningQuote o e t = return $ CONST o
 -- чтение переменной
-meaningReference :: String -> Env -> S.StateT (FrameList, GlobalEnv) IO Code
+meaningReference :: String -> Env -> StateT (FrameList, GlobalEnv) IO Code
 meaningReference name env = do
-  (_, glEnv) <- S.get
+  (_, glEnv) <- get
   let v = case kindVar env name glEnv of
              Nothing -> error "Unknown var"
              Just (Global i) -> GLOBAL i 
@@ -52,10 +52,10 @@ meaningSequence (o:t) e t' = do
 -- присваивание
 meaningAssignment var expr env t = do
   m <- meaning expr env False
-  (fr, glEnv) <- S.get
+  (fr, glEnv) <- get
   case kindVar env var glEnv of
     Nothing -> do
-      S.put (fr, glEnv ++ [(var, NUM 0)])
+      put (fr, glEnv ++ [(var, CONST $ NUM 0)])
       return $ SET_GLOBAL (length glEnv) m
     Just (Global i) -> return $ SET_GLOBAL i m
     Just (Local i j) -> return $ if i == 0 then SET_VAR_SH j m else SET_VAR_DEEP i j m

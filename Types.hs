@@ -29,8 +29,9 @@ data Code = CONST Object -- константа
   deriving (Show, Eq)
 
 type Env = [[String]] -- окружение - список кадров из переменных
-type GlobalEnv = [(String, Object)] -- глобальное окружение
+type GlobalEnv = [(String, Code)] -- глобальное окружение
 type FrameList = [V.Vector Object] -- записи активаций
+type Primitives = [(String, Object->Code)] -- примитивные функции
 
 instance Show Object where
   show (SYMBOL s) = s

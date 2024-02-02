@@ -1,34 +1,37 @@
 module VM (run) where
-import qualified Control.Monad.State as S
+import Control.Monad.State
 import qualified Data.Vector as V
 import Types
 
-run :: Code -> S.StateT (FrameList, GlobalEnv) IO Object
+run :: Code -> StateT (FrameList, GlobalEnv) IO Object
 run (CONST o) = return o
 run (VAR_SH j) = do
-  (fr, _) <- S.get
+  (fr, _) <- get
   return $ head fr V.! j
 run (VAR_DEEP i j) = do
-  (fr, _) <- S.get
+  (fr, _) <- get
   return $ (fr !! i) V.! j
 run (SET_VAR_SH j c) = do
-  (fr, env) <- S.get
+  (fr, env) <- get
   c' <- run c
-  S.put ((head fr V.// [(j, c')]):tail fr, env)
+  put ((head fr V.// [(j, c')]):tail fr, env)
   return c'
 run (SET_VAR_DEEP i j c) = do
-  (fr, env) <- S.get
+  (fr, env) <- get
   c' <- run c
-  S.put (deepUpdate fr i j c', env)
+  put (deepUpdate fr i j c', env)
   return c'
 run (SET_GLOBAL i c) = do
-  (fr, env) <- S.get
-  c' <- run c
-  S.put (fr, globalUpdate env i c')
-  return c'
+  (fr, env) <- get
+  put (fr, globalUpdate env i c)
+  (f, e) <- get
+  lift $ putStrLn $ show e
+  case c of
+    CLOSURE _ _ -> return $ SYMBOL "T"
+    _ -> run c
 run (GLOBAL i) = do
-  (_, env) <- S.get
-  let (_, o) = env !! i in return o
+  (_, env) <- get
+  let (_, o) = env !! i in run o
 run (IF cond t f) = do
   c <- run cond
   case c of
@@ -36,17 +39,17 @@ run (IF cond t f) = do
     LIST [] -> run f
 run (SEQ h t) = run h >> run t
 run (ALLOC size) = do -- создание кадра активации до применения функции
-  (fr, env) <- S.get
-  S.put ([V.generate size (\_ -> NUM 0)] ++ fr, env)
+  (fr, env) <- get
+  put ([V.generate size (\_ -> NUM 0)] ++ fr, env)
   return  $ NUM 0
 run (STORE c1 c2 i) = do -- сохраняем значение аргумента в последний кадр
   run c2
   c <- run c1
-  (fr, env) <- S.get
-  S.put ((head fr V.// [(i, c)]):tail fr, env)
+  (fr, env) <- get
+  put ((head fr V.// [(i, c)]):tail fr, env)
   return c
 run (CLOSURE code size) = do
-  (fr, _) <- S.get
+  (fr, _) <- get
   if (length $ head fr) /= size then error "Incorrect arity" else run code
 run (TAIL_CALL f args) = run args >> run f
 run (ADD c1 c2) = do
