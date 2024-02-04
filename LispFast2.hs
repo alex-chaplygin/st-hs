@@ -9,24 +9,23 @@ data Result = OK Object
   | ERROR String
   deriving Eq
 
-process :: StateT (FrameList, GlobalEnv) IO ()
-process = do
-  lift $ putStr "> "
-  str <- lift $ getLine
+process :: GlobalEnv -> IO ()
+process env = do
+  putStr "> "
+  str <- getLine
   if str == "q" then return () else do
     let ob = parse str
     if ob == [] then do
-      lift $ putStrLn "Ошибка ввода"
+      putStrLn "Ошибка ввода"
     else do
-      code <- meaning (fst $ last $ ob) [] True
-      lift $ putStrLn (show code)
-      res <- run code
-      lift $ putStrLn (show res)
-    process
+      let (code, env') = runState (meaning (fst $ last $ ob) [] True ) env
+      putStrLn (show code)
+      let (res, env'') = runState (run code) ([], env')
+      putStrLn (show res)
+      process $ snd env''
+    process env
 -- глобальное окружение
 globalEnv = [("T", CONST $ SYMBOL "T"), ("NIL", CONST $ LIST [])]
 
 main :: IO ()
-main = do
-  res <- runStateT process ([], globalEnv)
-  return ()
+main = process globalEnv

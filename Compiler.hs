@@ -7,7 +7,7 @@ data Var = Local Int Int -- ссылка на локальную перемен�
   | Global Int -- сылка на глобальную переменную
 
 -- анализатор программы
-meaning :: Object -> Env -> Bool -> StateT (FrameList, GlobalEnv) IO Code
+meaning :: Object -> Env -> Bool -> State GlobalEnv Code
 meaning o@(NUM i) e t = meaningQuote o e t
 meaning (LIST (SYMBOL "QUOTE":o:[])) e t = meaningQuote o e t
 meaning (SYMBOL name) e t = meaningReference name e
@@ -19,9 +19,9 @@ meaning (LIST (car:cdr)) e t = meaningApplication car cdr e t
 -- цитирование
 meaningQuote o e t = return $ CONST o
 -- чтение переменной
-meaningReference :: String -> Env -> StateT (FrameList, GlobalEnv) IO Code
+meaningReference :: String -> Env -> State GlobalEnv Code
 meaningReference name env = do
-  (_, glEnv) <- get
+  glEnv <- get
   let v = case kindVar env name glEnv of
              Nothing -> error "Unknown var"
              Just (Global i) -> GLOBAL i 
@@ -41,10 +41,10 @@ meaningSequence (o:t) e t' = do
   return $ SEQ m1 mt
 -- присваивание
 meaningAssignment var expr env t = do
-  (fr, glEnv) <- get
+  glEnv <- get
   case kindVar env var glEnv of
     Nothing -> do
-      put (fr, glEnv ++ [(var, CONST $ NUM 0)])
+      put $ glEnv ++ [(var, CONST $ NUM 0)]
       m <- meaning expr env False
       return $ SET_GLOBAL (length glEnv) m
     Just (Global i) -> meaning expr env False >>= \m -> return $ SET_GLOBAL i m

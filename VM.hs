@@ -4,10 +4,10 @@ import qualified Data.Vector as V
 import Types
 import Compiler(primitives)
 
-run :: Code -> StateT (FrameList, GlobalEnv) IO Object
+run :: Code -> State (FrameList, GlobalEnv) Object
 run com = do
   (fr, _) <- get
---  lift $ putStrLn $ show com ++ " " ++ show fr
+  --lift $ putStrLn $ show com ++ " " ++ show fr
   run' com
 run' (CONST o) = return o
 run' (VAR_SH j) = do
