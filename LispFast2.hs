@@ -21,9 +21,8 @@ process env = do
       let (code, env') = runState (meaning (fst $ last $ ob) [] True ) env
       putStrLn $ show code
       let state = execState (run code) $ startState env'
-      --putStrLn $ show $ _val state
+      putStrLn $ show $ _val state
       process $ _globalEnv state
-    process env
 -- глобальное окружение
 globalEnv = [("T", CONST $ SYMBOL "T"), ("NIL", CONST $ LIST [])]
 
