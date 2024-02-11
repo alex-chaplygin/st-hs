@@ -36,14 +36,15 @@ run (CONST o) = val .= o >> return ()
 --  c' <- run c
 --  put (deepUpdate fr i j c', env)
 ----  return c'
-run (SET_GLOBAL i c) = do
-  run c
+run (SET_GLOBAL i) = do
+  v <- use val
   env <- use globalEnv
-  globalEnv .= globalUpdate env i c
+  globalEnv .= globalUpdate env i v
   return ()
 run (GLOBAL i) = do
   env <- use globalEnv
-  let (_, c) = env !! i in run c >> return ()
+  let (_, o) = env !! i in val .= o
+  return ()
 --run (IF cond t f) = do
 --  c <- run cond
 --  case c of

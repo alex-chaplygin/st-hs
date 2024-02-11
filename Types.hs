@@ -14,10 +14,9 @@ data Code = CONST Object -- константа
   | VAR_DEEP Int Int -- аргумент из замыкания
   | GLOBAL Int -- глобальная переменная
   | IF Code Code Code -- условный оператор
-  | SEQ Code Code -- последовательность
-  | SET_VAR_SH Int Code -- установка локального аргумента
-  | SET_VAR_DEEP Int Int Code -- установка аргумента из замыкания
-  | SET_GLOBAL Int Code -- установка глобальной переменной
+  | SET_VAR_SH Int -- установка локального аргумента
+  | SET_VAR_DEEP Int Int -- установка аргумента из замыкания
+  | SET_GLOBAL Int -- установка глобальной переменной
   | CLOSURE Code Int -- замыкание
   | TAIL_CALL Code Code -- хвостовой вызов функции
   | CALL Code Code -- обычный вызов функции
@@ -29,7 +28,7 @@ data Code = CONST Object -- константа
   deriving (Show, Eq)
 
 type Env = [[String]] -- окружение - список кадров из переменных
-type GlobalEnv = [(String, Code)] -- глобальное окружение
+type GlobalEnv = [(String, Object)] -- глобальное окружение
 type FrameList = [V.Vector Object] -- записи активаций
 type Primitive = (String, Int, [Object]->Object) -- примитивные функции
 
