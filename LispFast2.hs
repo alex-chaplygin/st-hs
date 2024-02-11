@@ -18,13 +18,13 @@ process env = do
     if ob == [] then do
       putStrLn "Ошибка ввода"
     else do
-      let (code, env') = runState (meaning (fst $ last $ ob) [] True ) env
+      let (env', code) = execState (meaning (fst $ last $ ob) [] True ) (env, [])
       putStrLn $ show code
-      let state = execState (run code) $ startState env'
+      let state = execState (mapM_ run code) $ startState env'
       putStrLn $ show $ _val state
       process $ _globalEnv state
 -- глобальное окружение
-globalEnv = [("T", CONST $ SYMBOL "T"), ("NIL", CONST $ LIST [])]
+globalEnv = [("T", SYMBOL "T"), ("NIL", LIST [])]
 
 main :: IO ()
 main = process globalEnv
