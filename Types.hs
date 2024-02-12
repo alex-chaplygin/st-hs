@@ -13,7 +13,6 @@ data Code = CONST Object -- константа
   | VAR_SH Int -- локальный аргумент
   | VAR_DEEP Int Int -- аргумент из замыкания
   | GLOBAL Int -- глобальная переменная
-  | IF Code Code Code -- условный оператор
   | SET_VAR_SH Int -- установка локального аргумента
   | SET_VAR_DEEP Int Int -- установка аргумента из замыкания
   | SET_GLOBAL Int -- установка глобальной переменной
@@ -26,6 +25,8 @@ data Code = CONST Object -- константа
   | PRIM1 Int Code
   | PRIM2 Int Code Code
   | PUSHVAL -- загрузить в стек регистр val
+  | JMPFALSE Int -- переход, если в val находится nil
+  | GOTO Int -- переход, установка нового pc 
   | HALT -- останов машины
   deriving (Show, Eq)
 

@@ -32,15 +32,13 @@ exec code = do
     exec code
 
 run :: Code -> State VMState ()
-run (CONST o) = val .= o >> return ()
+run (CONST o) = val .= o
 run (VAR_SH j) = do
   fr <- use frames
   val .= head fr V.! j
-  return ()
 run (VAR_DEEP i j) = do
   fr <- use frames
   val .= (fr !! i) V.! j
-  return ()
 --run (SET_VAR_SH j c) = do
 --  c' <- run c
 --  updateFrame $ (head fr V.// [(j, c')]):tail fr
@@ -54,12 +52,15 @@ run (SET_GLOBAL i) = do
   v <- use val
   env <- use globalEnv
   globalEnv .= globalUpdate env i v
-  return ()
 run (GLOBAL i) = do
   env <- use globalEnv
-  let (_, o) = env !! i in val .= o
-  return ()
+  let (_, o) = env !! i
+  val .= o
 --run PUSHVAL = use val >>= \v -> use stack -> \s -> stack .= v::s >> return ()
+run (GOTO i) = pc .= i
+run (JMPFALSE i) = do
+  v <- use val
+  if v == LIST[] then run (GOTO i) else return ()
 --run (IF cond t f) = do
 --  c <- run cond
 --  case c of

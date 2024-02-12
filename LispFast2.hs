@@ -20,7 +20,7 @@ process env = do
     else do
       let (env', code) = execState (meaning (fst $ last $ ob) [] True ) (env, [])
           code' = code ++ [HALT]
-      putStrLn $ show code'
+      putStrLn $ concat $ map ((++"\n").show) code'
       let state = execState (exec $ code') $ startState env'
       putStrLn $ show $ _val state
       process $ _globalEnv state

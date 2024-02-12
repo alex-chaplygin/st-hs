@@ -14,7 +14,7 @@ meaning o@(NUM i) e t = meaningQuote o e t
 meaning (LIST (SYMBOL "QUOTE":o:[])) e t = meaningQuote o e t
 meaning (SYMBOL name) e t = meaningReference name e
 --meaning (LIST (SYMBOL "LAMBDA":(LIST args):body)) e t = meaningAbstraction args body e t
---meaning (LIST (SYMBOL "IF":expr:t:f:[])) e t' = meaningAlternative expr t f e t'
+meaning (LIST (SYMBOL "IF":expr:t:f:[])) e t' = meaningAlternative expr t f e t'
 meaning (LIST (SYMBOL "BEGIN":s)) e t = meaningSequence s e t
 meaning (LIST (SYMBOL "SETQ":SYMBOL var:exp:[])) e t = meaningAssignment var exp e t
 --meaning (LIST (car:cdr)) e t = meaningApplication car cdr e t
@@ -28,11 +28,28 @@ meaningReference name env = do
              Just (Global i) -> GLOBAL i 
              Just (Local i j) -> if i == 0 then VAR_SH j else VAR_DEEP i j
 -- ветвление
---meaningAlternative e1 e2 e3 env t = do
---  m1 <- meaning e1 env False
---  m2 <- meaning e2 env t
---  m3 <- meaning e3 env t
---  return $ IF m1 m2 m3
+meaningAlternative e1 e2 e3 env t = do
+  meaning e1 env False
+  emit $ JMPFALSE 0
+  l1 <- getpc
+  meaning e2 env t
+  emit $ GOTO 0
+  l2 <- getpc
+  putpc l1 $ l2
+  meaning e3 env t
+  l3 <- getpc
+  putpc l2 $ l3
+-- чтение адреса последней команды
+getpc :: State (GlobalEnv, [Code]) Int
+getpc = get >>= \(_, c) -> return $ length c - 1
+-- запись адреса
+putpc :: Int -> Int -> State (GlobalEnv, [Code]) ()
+putpc adr val = do
+  (env, code) <- get
+  let c = case code !! adr of
+            JMPFALSE _ -> JMPFALSE val
+            GOTO _ -> GOTO val
+  put (env, take adr code ++ [c] ++ drop (adr + 1) code)
 -- последовательность
 meaningSequence (o:[]) e t = meaning o e t
 meaningSequence (o:t) e t' = do
