@@ -16,7 +16,7 @@ data Code = CONST Object -- константа
   | SET_VAR_SH Int -- установка локального аргумента
   | SET_VAR_DEEP Int Int -- установка аргумента из замыкания
   | SET_GLOBAL Int -- установка глобальной переменной
-  | CLOSURE Code Int -- замыкание
+  | CLOSURE Int -- замыкание
   | TAIL_CALL Code Code -- хвостовой вызов функции
   | CALL Code Code -- обычный вызов функции
   | ALLOC Int -- создание кадра активации (размер)
@@ -26,7 +26,8 @@ data Code = CONST Object -- константа
   | PRIM2 Int Code Code
   | PUSHVAL -- загрузить в стек регистр val
   | JMPFALSE Int -- переход, если в val находится nil
-  | GOTO Int -- переход, установка нового pc 
+  | GOTO Int -- переход, установка нового pc
+  | RETURN -- возврат из функции
   | HALT -- останов машины
   deriving (Show, Eq)
 

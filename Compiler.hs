@@ -13,7 +13,7 @@ meaning :: Object -> Env -> Bool -> State (GlobalEnv, [Code]) ()
 meaning o@(NUM i) e t = meaningQuote o e t
 meaning (LIST (SYMBOL "QUOTE":o:[])) e t = meaningQuote o e t
 meaning (SYMBOL name) e t = meaningReference name e
---meaning (LIST (SYMBOL "LAMBDA":(LIST args):body)) e t = meaningAbstraction args body e t
+meaning (LIST (SYMBOL "LAMBDA":(LIST args):body)) e t = meaningAbstraction args body e t
 meaning (LIST (SYMBOL "IF":expr:t:f:[])) e t' = meaningAlternative expr t f e t'
 meaning (LIST (SYMBOL "BEGIN":s)) e t = meaningSequence s e t
 meaning (LIST (SYMBOL "SETQ":SYMBOL var:exp:[])) e t = meaningAssignment var exp e t
@@ -93,11 +93,16 @@ meaningAssignment var expr env t = do
 --    m2 <- meaning (head $ tail args) env False
 --    return $ PRIM2 num m1 m2
 -- абстракция
---meaningAbstraction args body env t = do
---  let arity = length args
---      env' = [map (\a@(SYMBOL s)->s) args] ++ env
---  m <- meaningSequence body env' True
---  return $ CLOSURE m arity
+meaningAbstraction args body env t = do
+  let arity = length args
+      env' = [map (\a@(SYMBOL s)->s) args] ++ env
+  emit $ CLOSURE arity
+  emit $ GOTO 0
+  l1 <- getpc
+  meaningSequence body env' True
+  emit $ RETURN
+  l2 <- getpc
+  putpc l1 l2
 -- рассчет индексов переменных для кадров активации
 kindVar env name globEnv = localVar env 0 <|> globalVar where
   localVar [] _ = Nothing

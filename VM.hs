@@ -11,6 +11,7 @@ data VMState = VMState
   , _globalEnv :: GlobalEnv -- глобальное окружение
   , _val :: Object -- регистр значений
   , _stack :: [Object] -- стек значений
+  , _callstack :: [Int] -- стек возвратов
   , _pc :: Int -- счетчик команд
   }
 makeLenses ''VMState
@@ -20,6 +21,7 @@ startState env = VMState
   , _globalEnv = env
   , _val = NUM 0
   , _stack = []
+  , _callstack = []
   , _pc = 0
   }
 -- цикл работы машины
@@ -61,11 +63,7 @@ run (GOTO i) = pc .= i
 run (JMPFALSE i) = do
   v <- use val
   if v == LIST[] then run (GOTO i) else return ()
---run (IF cond t f) = do
---  c <- run cond
---  case c of
---    SYMBOL "T" -> run t
---    LIST [] -> run f
+run RETURN = use callstack >>= \s -> pc .= head s >> callstack .= tail s
 --run (ALLOC size) = do -- создание кадра активации до применения функции
 --  (fr, env) <- get
 --  put ([V.generate size (\_ -> NUM 0)] ++ fr, env)
