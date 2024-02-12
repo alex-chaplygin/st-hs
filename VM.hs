@@ -1,4 +1,4 @@
-module VM (run, startState, VMState(..)) where
+module VM (exec, startState, VMState(..)) where
 {-# LANGUAGE TemplateHaskell #-}
 import Control.Monad.State
 import Control.Lens
@@ -10,6 +10,8 @@ data VMState = VMState
   { _frames :: FrameList -- кадры активации
   , _globalEnv :: GlobalEnv -- глобальное окружение
   , _val :: Object -- регистр значений
+  , _stack :: [Object] -- стек значений
+  , _pc :: Int -- счетчик команд
   }
 makeLenses ''VMState
 
@@ -17,16 +19,28 @@ startState env = VMState
   { _frames = []
   , _globalEnv = env
   , _val = NUM 0
+  , _stack = []
+  , _pc = 0
   }
+-- цикл работы машины
+exec code = do
+  pc' <- use pc
+  let c = code !! pc'
+  if c == HALT then return () else do
+    run c
+    pc += 1
+    exec code
 
 run :: Code -> State VMState ()
 run (CONST o) = val .= o >> return ()
---run (VAR_SH j) = do
---  fr <- use frames
---  return $ head fr V.! j
---run (VAR_DEEP i j) = do
---  (fr, _) <- get
---  return $ (fr !! i) V.! j
+run (VAR_SH j) = do
+  fr <- use frames
+  val .= head fr V.! j
+  return ()
+run (VAR_DEEP i j) = do
+  fr <- use frames
+  val .= (fr !! i) V.! j
+  return ()
 --run (SET_VAR_SH j c) = do
 --  c' <- run c
 --  updateFrame $ (head fr V.// [(j, c')]):tail fr
@@ -45,12 +59,12 @@ run (GLOBAL i) = do
   env <- use globalEnv
   let (_, o) = env !! i in val .= o
   return ()
+--run PUSHVAL = use val >>= \v -> use stack -> \s -> stack .= v::s >> return ()
 --run (IF cond t f) = do
 --  c <- run cond
 --  case c of
 --    SYMBOL "T" -> run t
 --    LIST [] -> run f
---run (SEQ h t) = run h >> run t
 --run (ALLOC size) = do -- создание кадра активации до применения функции
 --  (fr, env) <- get
 --  put ([V.generate size (\_ -> NUM 0)] ++ fr, env)

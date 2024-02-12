@@ -21,7 +21,6 @@ meaning (LIST (SYMBOL "SETQ":SYMBOL var:exp:[])) e t = meaningAssignment var exp
 -- цитирование
 meaningQuote o e t = emit $ CONST o
 -- чтение переменной
---meaningReference :: String -> Env -> State GlobalEnv Code
 meaningReference name env = do
   (glEnv,_) <- get
   emit $ case kindVar env name glEnv of

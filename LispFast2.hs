@@ -19,8 +19,9 @@ process env = do
       putStrLn "Ошибка ввода"
     else do
       let (env', code) = execState (meaning (fst $ last $ ob) [] True ) (env, [])
-      putStrLn $ show code
-      let state = execState (mapM_ run code) $ startState env'
+          code' = code ++ [HALT]
+      putStrLn $ show code'
+      let state = execState (exec $ code') $ startState env'
       putStrLn $ show $ _val state
       process $ _globalEnv state
 -- глобальное окружение

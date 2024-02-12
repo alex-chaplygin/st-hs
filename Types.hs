@@ -25,6 +25,8 @@ data Code = CONST Object -- константа
   | PRIM0 Int -- вызовы примитивов
   | PRIM1 Int Code
   | PRIM2 Int Code Code
+  | PUSHVAL -- загрузить в стек регистр val
+  | HALT -- останов машины
   deriving (Show, Eq)
 
 type Env = [[String]] -- окружение - список кадров из переменных
