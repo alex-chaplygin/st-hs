@@ -168,7 +168,7 @@ evalSet var expr env cc = eval expr env $ SetContinuation cc var env
 -- -- Ламбда    аргументы
 evalLambda :: Object -> [Object] -> Environment -> Continuation -> (Object, Environment)
 evalLambda args body env cc = resume cc $ LAMBDA args body env
-
+evalCallcc (LIST (SYMBOL "LAMBDA":args:body)) env cc = invoke (LAMBDA args body env) [CONT cc] env cc
 evalCatch tag body env cc = eval tag env $ CatchContinuation cc body env
 evalThrow tag form env cc = eval tag env $ ThrowContinuation cc form env
 
@@ -184,6 +184,7 @@ eval (LIST (SYMBOL "IF":expr:true:false)) env cc = evalIf expr true (head false)
 eval (LIST (SYMBOL "BEGIN":cdr)) env cc = evalBegin cdr env cc
 eval (LIST (SYMBOL "SETQ":SYMBOL var:expr)) env cc = evalSet var (head expr) env cc
 eval (LIST (SYMBOL "LAMBDA":args:body)) env cc = evalLambda args body env cc
+eval (LIST (SYMBOL "CALL/CC":lambda:[])) env cc = evalCallcc lambda env cc
 eval (LIST (SYMBOL "CATCH":tag:body)) env cc = evalCatch tag body env cc
 eval (LIST (SYMBOL "THROW":tag:val:_)) env cc = evalThrow tag val env cc
 eval (LIST (car:cdr)) env cc = evalApp car cdr env cc
@@ -222,8 +223,7 @@ globalEnv = [("T", t), ("NIL", nil),
              ("+", PRIM "+"),
              ("CONS", PRIM "cons"),
              ("CAR", PRIM "car"),
-             ("CDR", PRIM "cdr"),
-             ("CALL/CC", PRIM "call/cc")
+             ("CDR", PRIM "cdr")
              ]
 
 repl :: IO ()
