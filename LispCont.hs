@@ -111,8 +111,6 @@ invoke :: Object -> [Object] -> Environment -> Continuation -> (Object, Environm
 invoke (LAMBDA args body e) vals env cc = let newEnv = makeEnv args vals ++ e in
    evalBegin body newEnv cc
 invoke (CONT cc) vals env _ = resume cc $ head vals
--- вызов продолжить  с текущим продолжением
-invoke (PRIM "call/cc") vals env cc = invoke (head vals) [CONT cc] env cc
 -- вызов примитива
 invoke (PRIM f) vals _ cc = resume cc $ prim f vals
 invoke _ _ _ _ = error "Invoke"
