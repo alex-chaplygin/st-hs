@@ -10,7 +10,7 @@ data Object = SYMBOL String
   | NUM Int
   | LIST [Object]
   | LAMBDA Object [Object] -- функция параметры тело окружение
-  deriving (Eq)
+  | CONT Cont -- объект - продолжение
 
 type Var = String -- переменная
 type Addr = Int -- адрес памяти
@@ -18,16 +18,13 @@ type Env = Var -> Addr -- окружение хранит адреса для п
 type Mem = Addr -> Object -- память хранит объекты
 type Cont = Object -> Env -> Mem -> (Object, Env, Mem)-- продолжение
 
-data Result = OK Object
-  | ERROR String
-  deriving Eq
-
 instance Show Object where
   show (SYMBOL s) = s
   show (NUM i) = (show i)
   show (LIST []) = "NIL"
   show (LIST l) = "(" ++ (concat $ intersperse " " $ map show l) ++ ")"
   show (LAMBDA args body) = "LAMBDA " ++ (show args) ++ " " ++ (concat $ intersperse " " $ map show body)
+  show (CONT s) = "CONT"
 
 isNotDigit c = c < '0' || c > '9'
 isMySymbol c = isSymbol c || c == '*' || c == '/' || c == '+' || c == '-'
@@ -91,9 +88,11 @@ extendFMem mem = let NUM n = mem 0 in fst . foldl (\(m, n) v -> (extendMem m (n 
 -- применение функции
 applyFun :: Object -> [Object] -> Env -> Cont -> Mem -> (Object, Env, Mem)
 applyFun (LAMBDA (LIST params) body) args env c mem = (\vals e m -> evalBegin body (extendFEnv e m params) (\o _ _->c o e m) $ extendFMem m vals) (map (\x->(\(x, _, _) -> x) $ eval x env c mem) args) env mem
+applyFun (CONT cc) args env c mem = cc (head args) env mem
 
 eval (NUM i) e c m = c (NUM i) e m
 eval (LIST []) e c m = c (LIST []) e m
+eval (CONT cc) e c m = c (CONT cc) e m -- цитируем продолжение
 eval (SYMBOL name) env cont mem = cont (mem $ env name) env mem
 eval (LIST (SYMBOL "QUOTE":cdr)) e c m = c (head cdr) e m
 eval (LIST (SYMBOL "BEGIN":cdr)) env cc mem = evalBegin cdr env cc mem
@@ -101,6 +100,7 @@ eval (LIST (SYMBOL "IF":expr:t:f:[])) env cc mem = eval expr env
   (\e _ m -> (\p -> p (eval t env cc m) (eval f env cc m)) $ toBool e) mem
 eval (LIST (SYMBOL "SETQ":SYMBOL var:expr:[])) env cc mem = eval expr env (\v e m -> let e' = extendEnv env m var in cc v e' $ extendMem m (e' var) v) mem
 eval (LIST (SYMBOL "LAMBDA":args:body)) env c mem = c (LAMBDA args body) env mem
+eval (LIST (SYMBOL "CALL/CC":LIST (SYMBOL "LAMBDA":args:body):[])) env cc mem = applyFun (LAMBDA args body) [CONT cc] env cc mem
 eval (LIST (SYMBOL "CONS":car:cdr:[])) e c m =
   let (car', _, _) = eval car e c m
       (LIST cdr', _, _) = eval cdr e c m in c (LIST (car':cdr')) e m
@@ -117,12 +117,9 @@ process = do
   if str == "q" then return ()
     else do
     let ob = parse str
-    if ob == [] then do
-      S.liftIO $ putStrLn "Ошибка ввода"
-      else do
-      let (res, e', mem') = eval (fst $ last $ ob) e (\o e m -> (o, e, m)) mem
-      S.liftIO $ putStrLn (show res)
-      S.put (e', mem')
+    let (res, e', mem') = eval (fst $ last $ ob) e (\o e m -> (o, e, m)) mem
+    S.liftIO $ putStrLn (show res)
+    S.put (e', mem')
     process
 
 repl :: IO ()
