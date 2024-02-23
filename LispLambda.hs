@@ -3,7 +3,6 @@ import Text.ParserCombinators.ReadP
 import Data.Char
 import Data.List
 import Data.Map (Map)
-import Data.Hashable
 import qualified Control.Monad.State as S
 
 data Object = SYMBOL String
@@ -88,7 +87,7 @@ extendFMem mem = let NUM n = mem 0 in fst . foldl (\(m, n) v -> (extendMem m (n 
 -- применение функции
 applyFun :: Object -> [Object] -> Env -> Cont -> Mem -> (Object, Env, Mem)
 applyFun (LAMBDA (LIST params) body fenv) args env c mem = (\vals e m -> evalBegin body (extendFEnv e m params) (\o _ _->c o env m) $ extendFMem m vals) (map (\x->(\(x, _, _) -> x) $ eval x env c mem) args) fenv mem
-applyFun (CONT cc) args env c mem = cc (head args) env mem
+applyFun (CONT cc) args env c mem = eval (head args) env cc mem
 
 eval (NUM i) e c m = c (NUM i) e m
 eval (LIST []) e c m = c (LIST []) e m
